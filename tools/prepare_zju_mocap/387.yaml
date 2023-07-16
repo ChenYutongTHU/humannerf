@@ -1,5 +1,5 @@
 dataset:
-  zju_mocap_path: /data/dataset/zju_mocap
+  zju_mocap_path: /mnt/data/Gvlab/chenyutong/code/humannerf/data/zju
   subject: '387'
   sex: 'neutral'
 

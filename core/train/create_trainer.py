@@ -9,6 +9,6 @@ def _query_trainer():
     return trainer
 
 
-def create_trainer(network, optimizer):
+def create_trainer(network, optimizer, wandb_run):
     Trainer = _query_trainer()
-    return Trainer(network, optimizer)
+    return Trainer(network, optimizer, wandb_run)

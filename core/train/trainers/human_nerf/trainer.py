@@ -15,7 +15,7 @@ from core.utils.train_util import cpu_data_to_gpu, Timer
 from core.utils.image_util import tile_images, to_8b_image
 
 from configs import cfg
-
+import wandb
 img2mse = lambda x, y : torch.mean((x - y) ** 2)
 img2l1 = lambda x, y : torch.mean(torch.abs(x-y))
 to8b = lambda x : (255.*np.clip(x,0.,1.)).astype(np.uint8)
@@ -40,7 +40,7 @@ def scale_for_lpips(image_tensor):
 
 
 class Trainer(object):
-    def __init__(self, network, optimizer):
+    def __init__(self, network, optimizer, wandb_run=None):
         print('\n********** Init Trainer ***********')
 
         network = network.cuda().deploy_mlps_to_secondary_gpus()
@@ -48,6 +48,7 @@ class Trainer(object):
 
         self.optimizer = optimizer
         self.update_lr = create_lr_updater()
+        self.wandb_run = wandb_run
 
         if cfg.resume and Trainer.ckpt_exists(cfg.load_net):
             self.load_ckpt(f'{cfg.load_net}')
@@ -167,6 +168,8 @@ class Trainer(object):
                     self.timer.log(),
                     loss_str)
                 print(log_str)
+                if self.wandb_run is not None:
+                    wandb.log(loss_dict)
 
             is_reload_model = False
             if self.iter in [100, 300, 1000, 2500] or \

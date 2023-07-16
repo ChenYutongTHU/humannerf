@@ -22,7 +22,8 @@ _C.render_skip = 1
 _C.render_frames = 100
 
 # for data loader
-_C.num_workers = 4
+_C.DEBUG = (os.environ.get('DEBUG','False').lower()=='true')
+_C.num_workers = 0 if _C.DEBUG else 4
 
 
 def get_cfg_defaults():
@@ -65,6 +66,7 @@ def make_cfg(args):
 parser = argparse.ArgumentParser()
 parser.add_argument("--cfg", required=True, type=str)
 parser.add_argument("--type", default="skip", type=str)
+parser.add_argument("--pose_id", default="313", type=str)
 parser.add_argument("opts", default=None, nargs=argparse.REMAINDER)
 args = parser.parse_args()
 

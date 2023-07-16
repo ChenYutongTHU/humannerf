@@ -24,7 +24,7 @@ class Dataset(torch.utils.data.Dataset):
     def __init__(
             self, 
             dataset_path,
-            keyfilter=None,
+            keyfilter=None, 
             maxframes=-1,
             bgcolor=None,
             ray_shoot_mode='image',
@@ -53,6 +53,7 @@ class Dataset(torch.utils.data.Dataset):
 
         framelist = self.load_train_frames()
         self.framelist = framelist[::skip]
+
         if maxframes > 0:
             self.framelist = self.framelist[:maxframes]
         print(f' -- Total Frames: {self.get_total_frames()}')
@@ -160,22 +161,22 @@ class Dataset(torch.utils.data.Dataset):
                                             patch_size, H, W)
 
             assert len(ray_indices.shape) == 1
-            total_rays += len(ray_indices)
+            total_rays += len(ray_indices) #patch_size e.g. 32*32 or 20*20
 
             list_ray_indices.append(ray_indices)
-            list_mask.append(mask)
-            list_xy_min.append(xy_min)
-            list_xy_max.append(xy_max)
+            list_mask.append(mask) # mask is shaped as (32,32), only those within the box are True
+            list_xy_min.append(xy_min) # cooridante in the (512,512) image
+            list_xy_max.append(xy_max) # cooridante in the (512,512) image
             
-            patch_div_indices.append(total_rays)
+            patch_div_indices.append(total_rays) #
 
-        select_inds = np.concatenate(list_ray_indices, axis=0)
+        select_inds = np.concatenate(list_ray_indices, axis=0) #indices in the cropped bbox!  N_patch*patch_h*patch_w
         patch_info = {
-            'mask': np.stack(list_mask, axis=0),
-            'xy_min': np.stack(list_xy_min, axis=0),
-            'xy_max': np.stack(list_xy_max, axis=0)
+            'mask': np.stack(list_mask, axis=0), #(6,20,20)N_patch, Patch_h, Patch_w #mask for the match (32,32)
+            'xy_min': np.stack(list_xy_min, axis=0), #N_patch, xmin, ymin
+            'xy_max': np.stack(list_xy_max, axis=0) #N_patch, xmax, ymax in the uncropped (512,512)
         }
-        patch_div_indices = np.array(patch_div_indices)
+        patch_div_indices = np.array(patch_div_indices) 
 
         return select_inds, patch_info, patch_div_indices
 
@@ -212,16 +213,15 @@ class Dataset(torch.utils.data.Dataset):
 
         sel_ray_mask = np.zeros_like(candidate_mask)
         sel_ray_mask[y_min:y_max, x_min:x_max] = True
-
         #####################################################
         ## Below we determine the selected ray indices
         ## and patch valid mask
 
         sel_ray_mask = sel_ray_mask.reshape(-1)
-        inter_mask = np.bitwise_and(sel_ray_mask, ray_mask)
-        select_masked_inds = np.where(inter_mask)
+        inter_mask = np.bitwise_and(sel_ray_mask, ray_mask) #(512*512,)
+        select_masked_inds = np.where(inter_mask) #[1-dim,1-dim]
 
-        masked_indices = np.cumsum(ray_mask) - 1
+        masked_indices = np.cumsum(ray_mask) - 1 #local ind within the valid area of ray_mask
         select_inds = masked_indices[select_masked_inds]
         
         inter_mask = inter_mask.reshape(H, W)
@@ -266,7 +266,7 @@ class Dataset(torch.utils.data.Dataset):
 
     def sample_patch_rays(self, img, H, W,
                           subject_mask, bbox_mask, ray_mask,
-                          rays_o, rays_d, ray_img, near, far):
+                          rays_o, rays_d, ray_img, near, far): #bbox_mask (512,512) = reshaped ray_mask (512*512,)
 
         select_inds, patch_info, patch_div_indices = \
             self.get_patch_ray_indices(
@@ -308,7 +308,9 @@ class Dataset(torch.utils.data.Dataset):
 
         img, alpha = self.load_image(frame_name, bgcolor)
         img = (img / 255.).astype('float32')
-
+        results = {
+            'raw_rgbs': img, 
+        }
         H, W = img.shape[0:2]
 
         dst_skel_info = self.query_dst_skeleton(frame_name)

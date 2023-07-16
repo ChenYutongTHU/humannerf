@@ -4,6 +4,7 @@ import shutil
 from termcolor import colored
 from PIL import Image
 import numpy as np
+import imageio
 
 
 def load_image(path, to_rgb=True):
@@ -63,13 +64,22 @@ class ImageWriter():
         
         os.makedirs(self.image_dir, exist_ok=True)
         self.frame_idx = -1
+        self.images_np = []
 
     def append(self, image, img_name=None):
         self.frame_idx += 1
         if img_name is None:
             img_name = f"{self.frame_idx:06d}"
         save_image(image, f'{self.image_dir}/{img_name}.png')
+        self.images_np.append(image)
         return self.frame_idx, img_name
 
-    def finalize(self):
+    def finalize(self, video_name=None):
+        #save_video
+        image_stack = np.stack(self.images_np, axis=0)
+        if video_name is None:
+            video_name = self.image_dir+'.mp4' if self.image_dir[-1]!='/' else self.image_dir[:-1]+'.mp4'
+        else:
+            video_name = os.path.join(self.image_dir, video_name)
+        imageio.mimwrite(video_name, image_stack, format='mp4', fps=10, quality=8)
         pass

@@ -95,6 +95,11 @@ movement:
   shuffle: False
   drop_last: False
 
+novelpose:
+  batch_size: 1
+  shuffle: False
+  drop_last: False
+
 freeview:
   batch_size: 1
   shuffle: False

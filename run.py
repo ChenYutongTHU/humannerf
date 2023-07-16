@@ -51,11 +51,11 @@ def unpack_to_image(width, height, ray_mask, bgcolor,
 
 def _freeview(
         data_type='freeview',
-        folder_name=None):
+        folder_name=None, **kwargs):
     cfg.perturb = 0.
 
     model = load_network()
-    test_loader = create_dataloader(data_type)
+    test_loader = create_dataloader(data_type, **kwargs)
     writer = ImageWriter(
                 output_dir=os.path.join(cfg.logdir, cfg.load_net),
                 exp_name=folder_name)
@@ -80,6 +80,7 @@ def _freeview(
         height = batch['img_height']
         ray_mask = batch['ray_mask']
         target_rgbs = batch.get('target_rgbs', None)
+        raw_rgbs = batch.get('raw_rgbs', None)
 
         rgb_img, alpha_img, _ = unpack_to_image(
             width, height, ray_mask, np.array(cfg.bgcolor) / 255.,
@@ -88,8 +89,8 @@ def _freeview(
 
         imgs = [rgb_img]
         if cfg.show_truth and target_rgbs is not None:
-            target_rgbs = to_8b_image(target_rgbs.numpy())
-            imgs.append(target_rgbs)
+            raw_rgbs = to_8b_image(raw_rgbs.numpy())
+            imgs.append(raw_rgbs)
         if cfg.show_alpha:
             imgs.append(alpha_img)
 
@@ -113,6 +114,14 @@ def run_tpose():
         folder_name='tpose' \
             if not cfg.render_folder_name else cfg.render_folder_name)
 
+
+def run_novelpose():
+    cfg.show_truth = True
+    _freeview(
+        data_type=f'novelpose',
+        pose_id=args.pose_id,
+        folder_name=f'novelpose/{args.pose_id}' \
+            if not cfg.render_folder_name else cfg.render_folder_name)   
 
 def run_movement(render_folder_name='movement'):
     cfg.perturb = 0.
