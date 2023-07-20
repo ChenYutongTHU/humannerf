@@ -56,11 +56,12 @@ class Trainer(object):
             self.iter = 0
             self.save_ckpt('init')
             self.iter = 1
+        self.start_iter = self.iter
 
         self.timer = Timer()
 
         if "lpips" in cfg.train.lossweights.keys():
-            self.lpips = LPIPS(net='vgg')
+            self.lpips = LPIPS(net='vgg', lpips=cfg.lpips.lpips, layers=cfg.lpips.layers)
             set_requires_grad(self.lpips, requires_grad=False)
             self.lpips = nn.DataParallel(self.lpips).cuda()
 
@@ -99,7 +100,7 @@ class Trainer(object):
     def get_loss(self, net_output, 
                  patch_masks, bgcolor, targets, div_indices):
 
-        lossweights = cfg.train.lossweights
+        lossweights = {k:v for k,v in cfg.train.lossweights.items() if v>0 }
         loss_names = list(lossweights.keys())
 
         rgb = net_output['rgb']
@@ -172,7 +173,7 @@ class Trainer(object):
                     wandb.log(loss_dict)
 
             is_reload_model = False
-            if self.iter in [100, 300, 1000, 2500] or \
+            if self.iter in [self.start_iter, 100, 300, 1000, 2500] or \
                 self.iter % cfg.progress.dump_interval == 0:
                 is_reload_model = self.progress()
 

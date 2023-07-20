@@ -125,7 +125,7 @@ def run_novelpose():
 
 def run_movement(render_folder_name='movement'):
     cfg.perturb = 0.
-
+    cfg.show_truth = True
     model = load_network()
     test_loader = create_dataloader('movement')
     writer = ImageWriter(

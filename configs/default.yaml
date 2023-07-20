@@ -51,6 +51,7 @@ pose_decoder:
   embedding_size: 69
   mlp_width: 256
   mlp_depth: 4
+pose_decoder_off: False
 
 
 ##############################################3
@@ -82,6 +83,7 @@ train:
   lossweights:
     lpips: 1.0
     mse: 0.2
+    l1: 0.0
 
 
 progress:
@@ -137,3 +139,7 @@ n_gpus: 1
 
 show_alpha: False  
 show_truth: False
+
+lpips:
+  lpips: True 
+  layers: [0,1,2,3,4]

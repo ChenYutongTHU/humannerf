@@ -21,6 +21,19 @@ class DatasetArgs(object):
                     "src_type": 'zju_mocap',
                     "subject": sub,
                 },
+                f"zju_{sub}_tava_train": {
+                    "dataset_path": f"dataset/zju_mocap/{sub}_tava",
+                    "keyfilter": cfg.train_keyfilter,
+                    "ray_shoot_mode": cfg.train.ray_shoot_mode,
+                    "subject": sub,
+                },
+                f"zju_{sub}_tava_test": {
+                    "dataset_path": f"dataset/zju_mocap/{sub}_tava",
+                    "keyfilter": cfg.test_keyfilter,
+                    "ray_shoot_mode": 'image',
+                    "src_type": 'zju_mocap',
+                    "subject": sub,
+                },
     
             })
 

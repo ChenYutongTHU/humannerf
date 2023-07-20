@@ -20,16 +20,20 @@ class Embedder:
             
         max_freq = self.kwargs['max_freq_log2']
         N_freqs = self.kwargs['num_freqs']
-        
         freq_bands = 2.**torch.linspace(0., max_freq, steps=N_freqs)
             
         # get hann window weights
         kick_in_iter = torch.tensor(cfg.non_rigid_motion_mlp.kick_in_iter,
-                                    dtype=torch.float32)
-        t = torch.clamp(self.kwargs['iter_val'] - kick_in_iter, min=0.)
-        N = cfg.non_rigid_motion_mlp.full_band_iter - kick_in_iter
+                                    dtype=torch.float32) #T_s
+        t = torch.clamp(self.kwargs['iter_val'] - kick_in_iter, min=0.) #t-T_s
+        N = cfg.non_rigid_motion_mlp.full_band_iter - kick_in_iter  #T_e-T_s
         m = N_freqs
-        alpha = m * t / N
+
+        if N==0:
+            alpha = torch.tensor(m, dtype=torch.float32)
+            #print('Set delay-optimization to False')
+        else:
+            alpha = m * t / N
 
         for freq_idx, freq in enumerate(freq_bands):
             w = (1. - torch.cos(np.pi * torch.clamp(alpha - freq_idx, 

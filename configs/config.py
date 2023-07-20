@@ -24,7 +24,7 @@ _C.render_frames = 100
 # for data loader
 _C.DEBUG = (os.environ.get('DEBUG','False').lower()=='true')
 _C.num_workers = 0 if _C.DEBUG else 4
-
+_C.remove = False
 
 def get_cfg_defaults():
     return _C.clone()

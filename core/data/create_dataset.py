@@ -59,7 +59,7 @@ def create_dataloader(data_type='train', **kwargs):
                                               batch_size=batch_size,
                                               shuffle=shuffle,
                                               drop_last=drop_last,
-                                              num_workers=cfg.num_workers,
+                                              num_workers=cfg.num_workers if cfg.DEBUG==False else 0,
                                               worker_init_fn=_worker_init_fn)
 
     return data_loader

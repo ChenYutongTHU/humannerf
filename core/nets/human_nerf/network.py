@@ -353,7 +353,6 @@ class Network(nn.Module):
                 near=None, far=None,
                 iter_val=1e7,
                 **kwargs):
-
         dst_Rs=dst_Rs[None, ...]
         dst_Ts=dst_Ts[None, ...]
         dst_posevec=dst_posevec[None, ...]
@@ -361,7 +360,7 @@ class Network(nn.Module):
         motion_weights_priors=motion_weights_priors[None, ...]
 
         # correct body pose
-        if iter_val >= cfg.pose_decoder.get('kick_in_iter', 0):
+        if iter_val >= cfg.pose_decoder.get('kick_in_iter', 0) and cfg.pose_decoder_off==False:
             pose_out = self.pose_decoder(dst_posevec)
             refined_Rs = pose_out['Rs']
             refined_Ts = pose_out.get('Ts', None)

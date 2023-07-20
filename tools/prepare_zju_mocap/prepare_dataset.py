@@ -70,33 +70,47 @@ def main(argv):
     subject_dir = os.path.join(dataset_dir, f"CoreView_{subject}")
     smpl_params_dir = os.path.join(subject_dir, "new_params")
 
-    select_view = cfg['training_view']
+    multi_select_view = cfg['training_view']
+    if type(multi_select_view)==int:
+        multi_select_view = [multi_select_view]
+    multi_select_view = sorted(multi_select_view)
+
+    if 'train_split_file' in cfg:
+        with open(cfg['train_split_file'], mode="r") as fp:
+            frame_list = np.loadtxt(fp, dtype=int).tolist()
+    else:
+        frame_list = list(range(max_frames))
 
     anno_path = os.path.join(subject_dir, 'annots.npy')
     annots = np.load(anno_path, allow_pickle=True).item()
-    
-    # load cameras
-    cams = annots['cams']
-    cam_Ks = np.array(cams['K'])[select_view].astype('float32')
-    cam_Rs = np.array(cams['R'])[select_view].astype('float32')
-    cam_Ts = np.array(cams['T'])[select_view].astype('float32') / 1000.
-    cam_Ds = np.array(cams['D'])[select_view].astype('float32')
 
-    K = cam_Ks     #(3, 3)
-    D = cam_Ds[:, 0]
-    E = np.eye(4)  #(4, 4)
-    cam_T = cam_Ts[:3, 0]
-    E[:3, :3] = cam_Rs
-    E[:3, 3]= cam_T
+    #load cameras
+    cams = annots['cams']
+    Ks, Ds, Es = {}, {}, {}
+    for i, select_view in enumerate(multi_select_view):
+        cam_Ks = np.array(cams['K'])[select_view].astype('float32')
+        cam_Rs = np.array(cams['R'])[select_view].astype('float32')
+        cam_Ts = np.array(cams['T'])[select_view].astype('float32') / 1000.
+        cam_Ds = np.array(cams['D'])[select_view].astype('float32')
+
+        K = cam_Ks     #(3, 3)
+        D = cam_Ds[:, 0]
+        E = np.eye(4)  #(4, 4)
+        cam_T = cam_Ts[:3, 0]
+        E[:3, :3] = cam_Rs
+        E[:3, 3]= cam_T
+
+        Ks[select_view], Ds[select_view], Es[select_view] = K, D, E
+
     
     # load image paths
-    img_path_frames_views = annots['ims']
-    img_paths = np.array([
-        np.array(multi_view_paths['ims'])[select_view] \
-            for multi_view_paths in img_path_frames_views
-    ])
-    if max_frames > 0:
-        img_paths = img_paths[:max_frames]
+    img_paths = []
+    for frame_id in frame_list:
+        imgs_this_frame = annots['ims'][frame_id]['ims']      
+        img_paths.extend([imgs_this_frame[v] for v in multi_select_view])
+    # import ipdb; ipdb.set_trace()
+    img_paths = np.array(img_paths) #n_frame*n_view
+
 
     output_path = os.path.join(cfg['output']['dir'], 
                                subject if 'name' not in cfg['output'].keys() else cfg['output']['name'])
@@ -113,7 +127,12 @@ def main(argv):
     mesh_infos = {}
     all_betas = []
     for idx, ipath in enumerate(tqdm(img_paths)):
-        out_name = 'frame_{:06d}'.format(idx)
+        frame_id, select_view = idx//len(multi_select_view), idx%len(multi_select_view)
+        frame_id, select_view = frame_list[frame_id], multi_select_view[select_view] #!!
+        if len(multi_select_view)==1:
+            out_name = 'frame_{:06d}'.format(frame_id)
+        else:
+            out_name = 'frame_{:06d}_view_{:02d}'.format(frame_id, select_view)
 
         img_path = os.path.join(subject_dir, ipath)
     
@@ -125,7 +144,7 @@ def main(argv):
             start = image_basename.find(')_')
             smpl_idx = int(image_basename[start+2: start+6])
         else:
-            smpl_idx = idx
+            smpl_idx = frame_id #!!!
 
         # load smpl parameters
         smpl_params = np.load(
@@ -136,14 +155,14 @@ def main(argv):
         poses = smpl_params['poses'][0]  #(72,)
         Rh = smpl_params['Rh'][0]  #(3,)
         Th = smpl_params['Th'][0]  #(3,)
-        
+
         all_betas.append(betas)
 
         # write camera info
         cameras[out_name] = {
-                'intrinsics': K,
-                'extrinsics': E,
-                'distortions': D
+                'intrinsics': Ks[select_view],
+                'extrinsics': Es[select_view],
+                'distortions': Ds[select_view]
         }
 
         # write mesh info

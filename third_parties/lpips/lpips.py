@@ -22,26 +22,30 @@ def upsample(in_tens, out_HW=(64,64)): # assumes scale factor is same for H and 
 # Learned perceptual metric
 class LPIPS(nn.Module):
     def __init__(self, pretrained=True, net='alex', version='0.1', lpips=True, spatial=False, 
-        pnet_rand=False, pnet_tune=False, use_dropout=True, model_path=None, eval_mode=True, verbose=True):
+        pnet_rand=False, pnet_tune=False, use_dropout=True, model_path=None, eval_mode=True, verbose=True,
+        layers=[0,1,2,3,4]):
         # lpips - [True] means with linear calibration on top of base network
         # pretrained - [True] means load linear weights
 
         super(LPIPS, self).__init__()
         if(verbose):
-            print('Setting up [%s] perceptual loss: trunk [%s], v[%s], spatial [%s]'%
-                ('LPIPS' if lpips else 'baseline', net, version, 'on' if spatial else 'off'))
+            print('Setting up [%s] perceptual loss: trunk [%s], v[%s], spatial [%s] layers[%s]'%
+                ('LPIPS' if lpips else 'baseline', net, version, 'on' if spatial else 'off', str(layers)))
 
         self.pnet_type = net
         self.pnet_tune = pnet_tune
         self.pnet_rand = pnet_rand
         self.spatial = spatial
         self.lpips = lpips # false means baseline of just averaging all layers
+        self.layers = layers
         self.version = version
         self.scaling_layer = ScalingLayer()
 
         if(self.pnet_type in ['vgg','vgg16']):
             net_type = pn.vgg16
             self.chns = [64,128,256,512,512]
+            if self.lpips:
+                assert self.layers == [0,1,2,3,4]
         elif(self.pnet_type=='alex'):
             net_type = pn.alexnet
             self.chns = [64,192,384,256,256]
@@ -49,8 +53,7 @@ class LPIPS(nn.Module):
             net_type = pn.squeezenet
             self.chns = [64,128,256,384,384,512,512]
         self.L = len(self.chns)
-
-        self.net = net_type(pretrained=not self.pnet_rand, requires_grad=self.pnet_tune)
+        self.net = net_type(pretrained=(not self.pnet_rand), requires_grad=self.pnet_tune)
 
         if(lpips):
             self.lin0 = NetLinLayer(self.chns[0], use_dropout=use_dropout)
@@ -65,7 +68,7 @@ class LPIPS(nn.Module):
                 self.lins+=[self.lin5,self.lin6]
             self.lins = nn.ModuleList(self.lins)
 
-            if(pretrained):
+            if(pretrained): #load linear weights
                 if(model_path is None):
                     import inspect
                     import os
@@ -89,22 +92,25 @@ class LPIPS(nn.Module):
         feats0, feats1, diffs = {}, {}, {}
 
         for kk in range(self.L):
-            feats0[kk], feats1[kk] = lpips.normalize_tensor(outs0[kk]), lpips.normalize_tensor(outs1[kk])
-            diffs[kk] = (feats0[kk]-feats1[kk])**2
+            if kk in self.layers:
+                feats0[kk], feats1[kk] = lpips.normalize_tensor(outs0[kk]), lpips.normalize_tensor(outs1[kk])
+                diffs[kk] = (feats0[kk]-feats1[kk])**2 #distance
+            else:
+                diffs[kk] = 0
 
         if(self.lpips):
             if(self.spatial):
-                res = [upsample(self.lins[kk](diffs[kk]), out_HW=in0.shape[2:]) for kk in range(self.L)]
+                res = [upsample(self.lins[kk](diffs[kk]), out_HW=in0.shape[2:]) for kk in self.layers]
             else:
-                res = [spatial_average(self.lins[kk](diffs[kk]), keepdim=True) for kk in range(self.L)]
+                res = [spatial_average(self.lins[kk](diffs[kk]), keepdim=True) for kk in self.layers]
         else:
             if(self.spatial):
-                res = [upsample(diffs[kk].sum(dim=1,keepdim=True), out_HW=in0.shape[2:]) for kk in range(self.L)]
+                res = [upsample(diffs[kk].sum(dim=1,keepdim=True), out_HW=in0.shape[2:]) for kk in self.layers]
             else:
-                res = [spatial_average(diffs[kk].sum(dim=1,keepdim=True), keepdim=True) for kk in range(self.L)]
+                res = [spatial_average(diffs[kk].sum(dim=1,keepdim=True), keepdim=True) for kk in self.layers]
 
         val = res[0]
-        for l in range(1,self.L):
+        for l in range(1,len(self.layers)):
             val += res[l]
 
         # a = spatial_average(self.lins[kk](diffs[kk]), keepdim=True)
