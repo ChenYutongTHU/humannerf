@@ -55,6 +55,13 @@ class Network(nn.Module):
             get_embedder(cfg.canonical_mlp.multires, 
                          cfg.canonical_mlp.i_embed)
         self.pos_embed_fn = cnl_pos_embed_fn
+        
+        if cfg.canonical_mlp.view_dir:
+            self.dir_embed_fn, cnl_dir_embed_size = \
+                get_embedder(cfg.canonical_mlp.multires_dir, 
+                            cfg.canonical_mlp.i_embed)
+        else:
+            self.dir_embed_fn, cnl_dir_embed_size = None, -1
 
         # canonical mlp 
         skips = [4]
@@ -63,6 +70,8 @@ class Network(nn.Module):
                 input_ch=cnl_pos_embed_size, 
                 mlp_depth=cfg.canonical_mlp.mlp_depth, 
                 mlp_width=cfg.canonical_mlp.mlp_width,
+                view_dir=cfg.canonical_mlp.view_dir, 
+                input_ch_dir=cnl_dir_embed_size, 
                 skips=skips)
         self.cnl_mlp = \
             nn.DataParallel(
@@ -91,10 +100,13 @@ class Network(nn.Module):
             pos_xyz,
             pos_embed_fn, 
             non_rigid_pos_embed_fn,
-            non_rigid_mlp_input):
+            non_rigid_mlp_input,
+            dir_xyz,
+            dir_embed_fn):
 
         # (N_rays, N_samples, 3) --> (N_rays x N_samples, 3)
         pos_flat = torch.reshape(pos_xyz, [-1, pos_xyz.shape[-1]])
+        dir_flat = torch.reshape(dir_xyz, [-1, dir_xyz.shape[-1]])
         chunk = cfg.netchunk_per_gpu*len(cfg.secondary_gpus)
 
         result = self._apply_mlp_kernals(
@@ -102,7 +114,9 @@ class Network(nn.Module):
                         pos_embed_fn=pos_embed_fn,
                         non_rigid_mlp_input=non_rigid_mlp_input,
                         non_rigid_pos_embed_fn=non_rigid_pos_embed_fn,
-                        chunk=chunk)
+                        dir_flat=dir_flat, 
+                        dir_embed_fn=dir_embed_fn,
+                        chunk=chunk,)
 
         output = {}
 
@@ -127,6 +141,8 @@ class Network(nn.Module):
             pos_embed_fn,
             non_rigid_mlp_input,
             non_rigid_pos_embed_fn,
+            dir_flat, 
+            dir_embed_fn,
             chunk):
         raws = []
 
@@ -138,8 +154,7 @@ class Network(nn.Module):
                 end = pos_flat.shape[0]
             total_elem = end - start
 
-            xyz = pos_flat[start:end]
-
+            xyz, dir_ = pos_flat[start:end], dir_flat[start:end]
             if not cfg.ignore_non_rigid_motions:
                 non_rigid_embed_xyz = non_rigid_pos_embed_fn(xyz)
                 result = self.non_rigid_mlp(
@@ -150,8 +165,12 @@ class Network(nn.Module):
                 xyz = result['xyz']
 
             xyz_embedded = pos_embed_fn(xyz)
+            if cfg.canonical_mlp.view_dir:
+                dir_embed = dir_embed_fn(dir_)
+            else:
+                dir_embed = None
             raws += [self.cnl_mlp(
-                        pos_embed=xyz_embedded)]
+                        pos_embed=xyz_embedded, dir_embed=dir_embed)]
 
         output = {}
         output['raws'] = torch.cat(raws, dim=0).to(cfg.primary_gpus[0])
@@ -292,6 +311,7 @@ class Network(nn.Module):
             cnl_bbox_scale_xyz,
             pos_embed_fn,
             non_rigid_pos_embed_fn,
+            dir_embed_fn,
             non_rigid_mlp_input=None,
             bgcolor=None,
             **_):
@@ -303,8 +323,9 @@ class Network(nn.Module):
         if cfg.perturb > 0.:
             z_vals = self._stratified_sampling(z_vals)
 
-        pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
-        
+        pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] #6144, 128, 3
+        dir_xyz = torch.nn.functional.normalize(rays_d)[:,None,:] # N,1,3
+        dir_xyz = torch.tile(dir_xyz, [1,pts.shape[1],1])
         mv_output = self._sample_motion_fields(
                             pts=pts,
                             motion_scale_Rs=motion_scale_Rs[0], 
@@ -320,7 +341,9 @@ class Network(nn.Module):
                                 pos_xyz=cnl_pts,
                                 non_rigid_mlp_input=non_rigid_mlp_input,
                                 pos_embed_fn=pos_embed_fn,
-                                non_rigid_pos_embed_fn=non_rigid_pos_embed_fn)
+                                non_rigid_pos_embed_fn=non_rigid_pos_embed_fn,
+                                dir_embed_fn=dir_embed_fn,
+                                dir_xyz=dir_xyz)
         raw = query_result['raws']
         
         rgb_map, acc_map, _, depth_map = \
@@ -389,6 +412,7 @@ class Network(nn.Module):
 
         kwargs.update({
             "pos_embed_fn": self.pos_embed_fn,
+            "dir_embed_fn": self.dir_embed_fn,
             "non_rigid_pos_embed_fn": non_rigid_pos_embed_fn,
             "non_rigid_mlp_input": non_rigid_mlp_input
         })

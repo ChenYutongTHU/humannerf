@@ -31,10 +31,18 @@ def create_dataset(data_type='train',**kwargs):
 
     # customize dataset arguments according to dataset type
     args['bgcolor'] = None if data_type == 'train' else cfg.bgcolor
-    if data_type == 'progress':
+    if data_type in ['progress','movement']:
         total_train_imgs = _get_total_train_imgs(args['dataset_path'])
-        args['skip'] = total_train_imgs // 16
-        args['maxframes'] = 16
+        if data_type == 'progress':
+            args['skip'] = total_train_imgs // 16
+            args['maxframes'] = 16
+        elif data_type == 'movement':
+            args['skip'] = total_train_imgs // 64
+            args['maxframes'] = 64   
+        elif data_type == 'novelview':
+            pass #sub-sampling is already done in prepare_dataset.py  
+        elif data_type == 'novelpose_eval':
+            pass
     if data_type in ['freeview', 'tpose']:
         args['skip'] = cfg.render_skip
 

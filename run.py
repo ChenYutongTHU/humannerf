@@ -8,9 +8,9 @@ from core.data import create_dataloader
 from core.nets import create_network
 from core.utils.train_util import cpu_data_to_gpu
 from core.utils.image_util import ImageWriter, to_8b_image, to_8b3ch_image
-
+from core.utils.metrics_util import MetricsWriter
 from configs import cfg, args
-
+from collections import defaultdict
 EXCLUDE_KEYS_TO_GPU = ['frame_name',
                        'img_width', 'img_height', 'ray_mask']
 
@@ -59,6 +59,8 @@ def _freeview(
     writer = ImageWriter(
                 output_dir=os.path.join(cfg.logdir, cfg.load_net),
                 exp_name=folder_name)
+    metrics_writer = MetricsWriter(
+        output_dir=os.path.join(cfg.logdir, cfg.load_net))
 
     model.eval()
     for batch in tqdm(test_loader):
@@ -95,7 +97,10 @@ def _freeview(
             imgs.append(alpha_img)
 
         img_out = np.concatenate(imgs, axis=1)
-        writer.append(img_out)
+
+        img_name = None#TODO 
+        writer.append(img_out, img_name=img_name)
+        metrics_writer.append(name=img_name, pred=rgb_image, target=raw_rgbs)
 
     writer.finalize()
 
@@ -123,14 +128,26 @@ def run_novelpose():
         folder_name=f'novelpose/{args.pose_id}' \
             if not cfg.render_folder_name else cfg.render_folder_name)   
 
+def run_novelview():
+    cfg.show_truth = True
+    run_movement(render_folder_name='novelview')
+
+def run_novelpose_eval():
+    cfg.show_truth = True
+    run_movement(render_folder_name='novelpose_eval')
+
 def run_movement(render_folder_name='movement'):
     cfg.perturb = 0.
     cfg.show_truth = True
     model = load_network()
-    test_loader = create_dataloader('movement')
+    test_loader = create_dataloader(render_folder_name)
     writer = ImageWriter(
-        output_dir=os.path.join(cfg.logdir, cfg.load_net),
+        output_dir=os.path.join(cfg.logdir, cfg.load_net+cfg.eval_output_tag),
         exp_name=render_folder_name)
+    metrics_writer = MetricsWriter(
+        output_dir=os.path.join(cfg.logdir, cfg.load_net+cfg.eval_output_tag), 
+        exp_name=render_folder_name,
+        dataset=cfg[render_folder_name].dataset)
 
     model.eval()
     for idx, batch in enumerate(tqdm(test_loader)):
@@ -163,12 +180,16 @@ def run_movement(render_folder_name='movement'):
             imgs.append(truth_img)
         if cfg.show_alpha:
             imgs.append(alpha_img)
-            
-        img_out = np.concatenate(imgs, axis=1)
-        writer.append(img_out, img_name=f"{idx:06d}")
-    
-    writer.finalize()
 
+
+        metrics_writer.append(name=batch['frame_name'], pred=rgb_img, target=truth_img, mask=None)
+        img_out = np.concatenate(imgs, axis=1)
+        writer.append(img_out, img_name=batch['frame_name'].replace('/','-'))
+
+
+    writer.finalize()
+    metrics_writer.finalize()
+    
         
 if __name__ == '__main__':
     globals()[f'run_{args.type}']()

@@ -20,6 +20,7 @@ _C.render_folder_name = ""
 _C.ignore_non_rigid_motions = False
 _C.render_skip = 1
 _C.render_frames = 100
+_C.eval_output_tag = ''
 
 # for data loader
 _C.DEBUG = (os.environ.get('DEBUG','False').lower()=='true')

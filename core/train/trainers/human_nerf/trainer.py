@@ -206,7 +206,7 @@ class Trainer(object):
     def progress(self):
         self.progress_begin()
 
-        print('Evaluate Progress Images ...')
+        print('Evaluate Progress Images ...') #TODO quantitative evaluation
 
         images = []
         is_empty_img = False

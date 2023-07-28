@@ -1,21 +1,21 @@
 task: 'zju_mocap'
 subject: 'p387'
-experiment: 'adventure'
+experiment: 'tava_split'
 
 ##############################################3
 ## Data Configuration
 
 train:
   dataset_module: 'core.data.human_nerf.train'
-  dataset: 'zju_387_train'
+  dataset: 'zju_387_tava_train'
 
 progress:
   dataset_module: 'core.data.human_nerf.train'
-  dataset: 'zju_387_test'
+  dataset: 'zju_387_tava_test'
 
 movement:
   dataset_module: 'core.data.human_nerf.train'
-  dataset: 'zju_387_test'
+  dataset: 'zju_387_tava_test_1view'
 
 freeview:
   dataset_module: 'core.data.human_nerf.freeview'
@@ -31,7 +31,11 @@ novelpose:
 
 novelview:
   dataset_module: 'core.data.human_nerf.train'
-  dataset: 'zju_387_test_fr-hn_vw-3-9-15-22'
-  
+  dataset: 'zju_387_test_fr-tv_vw-3-9-15-22'
+
+novelpose_eval:
+  dataset_module: 'core.data.human_nerf.train'
+  dataset: 'zju_387_test_fr-tv_vw-3-9-15-22_ood'
+
 bgcolor: [0., 0., 0.]
 resize_img_scale: 0.5

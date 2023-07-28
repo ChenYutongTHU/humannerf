@@ -6,7 +6,7 @@ import cv2
 import torch
 import torch.utils.data
 
-from core.utils.image_util import load_image
+from core.utils.image_util import load_image, to_3ch_image
 from core.utils.body_util import \
     body_pose_to_body_RTs, \
     get_canonical_global_tfms, \
@@ -16,6 +16,7 @@ from core.utils.camera_util import \
     apply_global_tfm_to_camera, \
     get_rays_from_KRT, \
     rays_intersect_3d_bbox
+from tools.prepare_zju_mocap.prepare_dataset import get_mask
 
 from configs import cfg
 
@@ -24,6 +25,7 @@ class Dataset(torch.utils.data.Dataset):
     def __init__(
             self, 
             dataset_path,
+            source_path=None, 
             keyfilter=None, 
             maxframes=-1,
             bgcolor=None,
@@ -31,10 +33,13 @@ class Dataset(torch.utils.data.Dataset):
             skip=1,
             **_):
 
-        print('[Dataset Path]', dataset_path) 
-
-        self.dataset_path = dataset_path
-        self.image_dir = os.path.join(dataset_path, 'images')
+        print('[Dataset Path] ', dataset_path, '[Source Path] ', source_path) 
+        self.dataset_path, self.source_path = dataset_path, source_path
+        
+        if self.source_path is None:
+            self.image_dir = os.path.join(dataset_path, 'images') 
+        else:
+            self.image_dir = source_path
 
         self.canonical_joints, self.canonical_bbox = \
             self.load_canonical_joints()
@@ -53,7 +58,6 @@ class Dataset(torch.utils.data.Dataset):
 
         framelist = self.load_train_frames()
         self.framelist = framelist[::skip]
-
         if maxframes > 0:
             self.framelist = self.framelist[:maxframes]
         print(f' -- Total Frames: {self.get_total_frames()}')
@@ -100,9 +104,12 @@ class Dataset(torch.utils.data.Dataset):
         return mesh_infos
 
     def load_train_frames(self):
-        img_paths = list_files(os.path.join(self.dataset_path, 'images'),
-                               exts=['.png'])
-        return [split_path(ipath)[1] for ipath in img_paths]
+        if self.source_path is None:
+            img_paths = list_files(os.path.join(self.dataset_path, 'images'),
+                                exts=['.png'])
+            return [split_path(ipath)[1] for ipath in img_paths]
+        else:
+            return list(self.mesh_infos.keys()) #OrderedDict
     
     def query_dst_skeleton(self, frame_name):
         return {
@@ -231,13 +238,17 @@ class Dataset(torch.utils.data.Dataset):
                 np.array([x_min, y_min]), np.array([x_max, y_max])
     
     def load_image(self, frame_name, bg_color):
-        imagepath = os.path.join(self.image_dir, '{}.png'.format(frame_name))
-        orig_img = np.array(load_image(imagepath))
+        if self.source_path is None:
+            imagepath = os.path.join(self.image_dir, '{}.png'.format(frame_name))
+            maskpath = os.path.join(self.dataset_path, 
+                                    'masks', 
+                                    '{}.png'.format(frame_name))
+            alpha_mask = np.array(load_image(maskpath))
+        else:
+            imagepath = os.path.join(self.image_dir, frame_name)
+            alpha_mask = to_3ch_image(get_mask(self.source_path, img_name=frame_name))
 
-        maskpath = os.path.join(self.dataset_path, 
-                                'masks', 
-                                '{}.png'.format(frame_name))
-        alpha_mask = np.array(load_image(maskpath))
+        orig_img = np.array(load_image(imagepath))
         
         # undistort image
         if frame_name in self.cameras and 'distortions' in self.cameras[frame_name]:
@@ -300,7 +311,7 @@ class Dataset(torch.utils.data.Dataset):
         results = {
             'frame_name': frame_name
         }
-
+        
         if self.bgcolor is None:
             bgcolor = (np.random.rand(3) * 255.).astype('float32')
         else:
@@ -308,9 +319,7 @@ class Dataset(torch.utils.data.Dataset):
 
         img, alpha = self.load_image(frame_name, bgcolor)
         img = (img / 255.).astype('float32')
-        results = {
-            'raw_rgbs': img, 
-        }
+        results['raw_rgbs'] = img
         H, W = img.shape[0:2]
 
         dst_skel_info = self.query_dst_skeleton(frame_name)

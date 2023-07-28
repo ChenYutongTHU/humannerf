@@ -25,6 +25,8 @@ canonical_mlp:
   mlp_width: 256       # channels per layer
   multires: 10         # log2 of max freq for positional encoding (3D location)
   i_embed: 0           # set 0 for default positional encoding, -1 for none
+  view_dir: False
+  multires_dir: 4
 
 # motion weights volume
 mweight_volume:
@@ -64,6 +66,9 @@ test_keyfilter: ['rays', 'target_rgbs',
                  'motion_bases', 'motion_weights_priors',
                   'cnl_bbox', 'dst_posevec_69']
 
+eval:
+  metrics: ["lpips", "psnr", "ssim"]
+
 train:
   perturb: 1.        # only for training, set to 0. for no jitter, 1. for jitter
   batch_size: 1
@@ -97,7 +102,17 @@ movement:
   shuffle: False
   drop_last: False
 
+novelview:
+  batch_size: 1
+  shuffle: False
+  drop_last: False
+
 novelpose:
+  batch_size: 1
+  shuffle: False
+  drop_last: False
+
+novelpose_eval:
   batch_size: 1
   shuffle: False
   drop_last: False
