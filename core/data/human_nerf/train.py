@@ -62,6 +62,10 @@ class Dataset(torch.utils.data.Dataset):
             self.framelist = self.framelist[:maxframes]
         print(f' -- Total Frames: {self.get_total_frames()}')
 
+        
+        self.views = self.get_total_views()
+        print(f'Views:{self.views}')
+
         self.keyfilter = keyfilter
         self.bgcolor = bgcolor
 
@@ -111,6 +115,21 @@ class Dataset(torch.utils.data.Dataset):
         else:
             return list(self.mesh_infos.keys()) #OrderedDict
     
+    def parse_view_from_frame(self, frame_name):
+        if 'view' in frame_name:
+            #frame_000008_view_00.png
+            view = int(frame_name.split('view_')[1][:2])
+        elif 'Camera' in frame_name:
+            #Camera_B4/000438.jpg
+            view = int(frame_name.split('/')[0].split('Camera_B')[1])
+        else:
+            view = 0 #legacy use Camera 00
+        return view
+
+    def get_total_views(self):
+        views = [self.parse_view_from_frame(fn) for fn in self.framelist]
+        return sorted(list(set(views)))
+
     def query_dst_skeleton(self, frame_name):
         return {
             'poses': self.mesh_infos[frame_name]['poses'].astype('float32'),
@@ -311,7 +330,20 @@ class Dataset(torch.utils.data.Dataset):
         results = {
             'frame_name': frame_name
         }
-        
+
+        if cfg.multihead.split == 'view':
+            if self.ray_shoot_mode=='image':
+                if cfg.test.head_id == -1: #auto
+                    view_id = self.parse_view_from_frame(frame_name)
+                    results['head_id'] = self.views.index(view_id)
+                else:
+                    results['head_id'] = int(cfg.test.head_id)
+            elif self.ray_shoot_mode=='patch': #training
+                view_id = self.parse_view_from_frame(frame_name)
+                results['head_id'] = self.views.index(view_id)
+            else:
+                raise ValueError
+
         if self.bgcolor is None:
             bgcolor = (np.random.rand(3) * 255.).astype('float32')
         else:

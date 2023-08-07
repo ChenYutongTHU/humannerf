@@ -51,16 +51,18 @@ def unpack_to_image(width, height, ray_mask, bgcolor,
 
 def _freeview(
         data_type='freeview',
-        folder_name=None, **kwargs):
+        folder_name=None, render_folder_name='freeview', **kwargs):
     cfg.perturb = 0.
 
     model = load_network()
     test_loader = create_dataloader(data_type, **kwargs)
     writer = ImageWriter(
-                output_dir=os.path.join(cfg.logdir, cfg.load_net),
-                exp_name=folder_name)
-    metrics_writer = MetricsWriter(
-        output_dir=os.path.join(cfg.logdir, cfg.load_net))
+        output_dir=os.path.join(cfg.logdir, cfg.load_net+cfg.eval_output_tag),
+        exp_name=render_folder_name)
+    # metrics_writer = MetricsWriter(
+    #     output_dir=os.path.join(cfg.logdir, cfg.load_net+cfg.eval_output_tag), 
+    #     exp_name=render_folder_name,
+    #     dataset=cfg[render_folder_name].dataset)
 
     model.eval()
     for batch in tqdm(test_loader):
@@ -100,7 +102,7 @@ def _freeview(
 
         img_name = None#TODO 
         writer.append(img_out, img_name=img_name)
-        metrics_writer.append(name=img_name, pred=rgb_image, target=raw_rgbs)
+        #metrics_writer.append(name=img_name, pred=rgb_img, target=raw_rgbs)
 
     writer.finalize()
 
@@ -108,7 +110,7 @@ def _freeview(
 def run_freeview():
     _freeview(
         data_type='freeview',
-        folder_name=f"freeview_{cfg.freeview.frame_idx}" \
+        render_folder_name=f"freeview_{cfg.freeview.frame_idx}" \
             if not cfg.render_folder_name else cfg.render_folder_name)
 
 
@@ -131,6 +133,10 @@ def run_novelpose():
 def run_novelview():
     cfg.show_truth = True
     run_movement(render_folder_name='novelview')
+
+def run_novelview_all():
+    cfg.show_truth = True
+    run_movement(render_folder_name='novelview_all')
 
 def run_novelpose_eval():
     cfg.show_truth = True

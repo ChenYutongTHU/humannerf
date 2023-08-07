@@ -21,7 +21,14 @@ def _get_total_train_imgs(dataset_path):
     train_img_paths = \
         list_files(os.path.join(dataset_path, 'images'),
                                 exts=['.png'])
-    return len(train_img_paths)
+    if len(train_img_paths)>0:
+        return len(train_img_paths)
+    else: #v2
+        import pickle
+        with open(os.path.join(dataset_path, 'cameras.pkl'), 'rb') as f: 
+            cameras = pickle.load(f)
+        return len(cameras)
+
 
 
 def create_dataset(data_type='train',**kwargs):

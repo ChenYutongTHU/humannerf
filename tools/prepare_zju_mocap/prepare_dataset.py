@@ -74,6 +74,8 @@ def main(argv):
     multi_select_view = cfg['training_view']
     if type(multi_select_view)==int:
         multi_select_view = [multi_select_view]
+    elif type(multi_select_view)==str and multi_select_view=='all':
+        multi_select_view = list(range(0,23))
     multi_select_view = sorted(multi_select_view)
 
     if 'train_split_file' in cfg:

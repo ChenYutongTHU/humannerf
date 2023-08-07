@@ -8,6 +8,14 @@ class DatasetArgs(object):
     if cfg.category == 'human_nerf' and cfg.task == 'zju_mocap':
         for sub in subjects:
             dataset_attrs.update({
+                f"zju_{sub}_test_fr-tv_vw-all":{
+                    "source_path": f"data/zju/CoreView_{sub}",
+                    "dataset_path": f"dataset/zju_mocap/{sub}_fr-tv_vw-all",
+                    "keyfilter": cfg.test_keyfilter,
+                    "ray_shoot_mode": 'image',
+                    "src_type": 'zju_mocap',
+                    "subject": sub,                    
+                },    
                 f"zju_{sub}_test_fr-tv_vw-3-9-15-22_ood":{
                     "source_path": f"data/zju/CoreView_{sub}",
                     "dataset_path": f"dataset/zju_mocap/{sub}_fr-tv_vw-3-9-15-22_ood",
@@ -79,6 +87,36 @@ class DatasetArgs(object):
                 },
                 f"zju_{sub}_tava_test_1view_camera6": {
                     "dataset_path": f"dataset/zju_mocap/{sub}_tava_1view_camera6",
+                    "keyfilter": cfg.test_keyfilter,
+                    "ray_shoot_mode": 'image',
+                    "src_type": 'zju_mocap',
+                    "subject": sub,
+                }, 
+                f"zju_{sub}_tava_train_1view_camera12": {
+                    "source_path": f"data/zju/CoreView_{sub}",
+                    "dataset_path": f"dataset/zju_mocap/{sub}_tava_1view_camera12",
+                    "keyfilter": cfg.train_keyfilter,
+                    "ray_shoot_mode": cfg.train.ray_shoot_mode,
+                    "subject": sub,
+                },
+                f"zju_{sub}_tava_test_1view_camera12": {
+                    "source_path": f"data/zju/CoreView_{sub}",
+                    "dataset_path": f"dataset/zju_mocap/{sub}_tava_1view_camera12",
+                    "keyfilter": cfg.test_keyfilter,
+                    "ray_shoot_mode": 'image',
+                    "src_type": 'zju_mocap',
+                    "subject": sub,
+                }, 
+                f"zju_{sub}_tava_train_1view_camera18": {
+                    "source_path": f"data/zju/CoreView_{sub}",
+                    "dataset_path": f"dataset/zju_mocap/{sub}_tava_1view_camera18",
+                    "keyfilter": cfg.train_keyfilter,
+                    "ray_shoot_mode": cfg.train.ray_shoot_mode,
+                    "subject": sub,
+                },
+                f"zju_{sub}_tava_test_1view_camera18": {
+                    "source_path": f"data/zju/CoreView_{sub}",
+                    "dataset_path": f"dataset/zju_mocap/{sub}_tava_1view_camera18",
                     "keyfilter": cfg.test_keyfilter,
                     "ray_shoot_mode": 'image',
                     "src_type": 'zju_mocap',

@@ -25,13 +25,13 @@ def get_optimizer(network):
                 params += [{"params": [value], 
                             "lr": cfg.train[f'lr_{lr_name}'],
                             "name": lr_name}]
-                print(f"{key}: lr = {cfg.train[f'lr_{lr_name}']}")
+                print(f"{key}: lr = {cfg.train[f'lr_{lr_name}']} shape={tuple(value.shape)}")
                 is_assigned_lr = True
 
         if not is_assigned_lr:
             params += [{"params": [value], 
                         "name": key}]
-            print(f"{key}: lr = {cfg.train.lr}")
+            print(f"{key}: lr = {cfg.train.lr} shape={tuple(value.shape)}")
 
     print('\n******************************************\n\n')
 

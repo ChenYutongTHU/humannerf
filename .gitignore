@@ -1,6 +1,8 @@
 outputs/
+scripts/
 experiments/
 dataset/
+tools/prepare_zju_mocap/*yaml
 data/
 third_parties
 anything.ipynb

@@ -22,11 +22,16 @@ non_rigid_embedder:
 canonical_mlp:
   module: 'core.nets.human_nerf.canonical_mlps.mlp_rgb_sigma'
   mlp_depth: 8         # layers in network
+  mlp_depth_plus: 0
   mlp_width: 256       # channels per layer
   multires: 10         # log2 of max freq for positional encoding (3D location)
   i_embed: 0           # set 0 for default positional encoding, -1 for none
   view_dir: False
   multires_dir: 4
+  last_linear_scale: 1
+  multihead:
+    enable: False
+    head_depth: 1
 
 # motion weights volume
 mweight_volume:
@@ -40,12 +45,17 @@ non_rigid_motion_mlp:
   module: 'core.nets.human_nerf.non_rigid_motion_mlps.mlp_offset'
   condition_code_size: 69
   mlp_width: 128
+  mlp_depth_plus: 0
   mlp_depth: 6
   skips: [4]
   multires: 6       # log2 of max freq for positional encoding (3D location)
   i_embed: 0        # set 0 for default positional encoding, -1 for none
   kick_in_iter: 10000
   full_band_iter: 50000
+  last_linear_scale: 1
+  multihead:
+    enable: False
+    head_depth: 1
 
 # pose decoder
 pose_decoder:
@@ -89,7 +99,8 @@ train:
     lpips: 1.0
     mse: 0.2
     l1: 0.0
-
+test:
+  head_id: -1
 
 progress:
   batch_size: 1
@@ -103,6 +114,11 @@ movement:
   drop_last: False
 
 novelview:
+  batch_size: 1
+  shuffle: False
+  drop_last: False
+
+novelview_all:
   batch_size: 1
   shuffle: False
   drop_last: False
@@ -158,3 +174,9 @@ show_truth: False
 lpips:
   lpips: True 
   layers: [0,1,2,3,4]
+
+multihead:
+  split: view
+  head_num: 4
+
+

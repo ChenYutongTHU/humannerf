@@ -131,6 +131,15 @@ class Dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         results = {}
 
+        if cfg.multihead.split == 'view':
+            if cfg.test.head_id == -1: #auto
+                view_id = self.parse_view_from_frame(frame_name)
+                results['head_id'] = self.views.index(view_id)
+            else:
+                results['head_id'] = int(cfg.test.head_id)
+        else:
+            raise ValueError
+
         bgcolor = np.array(self.bgcolor, dtype='float32')
 
         H = W = self.img_size

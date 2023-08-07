@@ -42,7 +42,12 @@ class Network(nn.Module):
                 condition_code_size=cfg.non_rigid_motion_mlp.condition_code_size,
                 mlp_width=cfg.non_rigid_motion_mlp.mlp_width,
                 mlp_depth=cfg.non_rigid_motion_mlp.mlp_depth,
-                skips=cfg.non_rigid_motion_mlp.skips)
+                skips=cfg.non_rigid_motion_mlp.skips,
+                multihead_enable=cfg.non_rigid_motion_mlp.multihead.enable,
+                multihead_depth=cfg.non_rigid_motion_mlp.multihead.head_depth,
+                multihead_num=cfg.multihead.head_num,
+                last_linear_scale=cfg.non_rigid_motion_mlp.last_linear_scale,
+                mlp_depth_plus=cfg.non_rigid_motion_mlp.mlp_depth_plus)
         self.non_rigid_mlp = \
             nn.DataParallel(
                 self.non_rigid_mlp,
@@ -72,7 +77,12 @@ class Network(nn.Module):
                 mlp_width=cfg.canonical_mlp.mlp_width,
                 view_dir=cfg.canonical_mlp.view_dir, 
                 input_ch_dir=cnl_dir_embed_size, 
-                skips=skips)
+                skips=skips,
+                multihead_enable=cfg.canonical_mlp.multihead.enable,
+                multihead_depth=cfg.canonical_mlp.multihead.head_depth,
+                multihead_num=cfg.multihead.head_num,
+                last_linear_scale=cfg.canonical_mlp.last_linear_scale,
+                mlp_depth_plus=cfg.canonical_mlp.mlp_depth_plus)
         self.cnl_mlp = \
             nn.DataParallel(
                 self.cnl_mlp,
@@ -102,7 +112,8 @@ class Network(nn.Module):
             non_rigid_pos_embed_fn,
             non_rigid_mlp_input,
             dir_xyz,
-            dir_embed_fn):
+            dir_embed_fn, 
+            head_id):
 
         # (N_rays, N_samples, 3) --> (N_rays x N_samples, 3)
         pos_flat = torch.reshape(pos_xyz, [-1, pos_xyz.shape[-1]])
@@ -116,7 +127,7 @@ class Network(nn.Module):
                         non_rigid_pos_embed_fn=non_rigid_pos_embed_fn,
                         dir_flat=dir_flat, 
                         dir_embed_fn=dir_embed_fn,
-                        chunk=chunk,)
+                        chunk=chunk, head_id=head_id)
 
         output = {}
 
@@ -143,7 +154,7 @@ class Network(nn.Module):
             non_rigid_pos_embed_fn,
             dir_flat, 
             dir_embed_fn,
-            chunk):
+            chunk, head_id):
         raws = []
 
         # iterate ray samples by trunks
@@ -155,22 +166,25 @@ class Network(nn.Module):
             total_elem = end - start
 
             xyz, dir_ = pos_flat[start:end], dir_flat[start:end]
+            head_id_expanded = self._expand_input(head_id[None, None, ...], total_elem)
             if not cfg.ignore_non_rigid_motions:
                 non_rigid_embed_xyz = non_rigid_pos_embed_fn(xyz)
                 result = self.non_rigid_mlp(
                     pos_embed=non_rigid_embed_xyz,
                     pos_xyz=xyz,
-                    condition_code=self._expand_input(non_rigid_mlp_input, total_elem)
+                    condition_code=self._expand_input(non_rigid_mlp_input, total_elem),
+                    head_id=head_id_expanded
                 )
-                xyz = result['xyz']
+                xyz = result['xyz'] #B, 3
 
-            xyz_embedded = pos_embed_fn(xyz)
+            xyz_embedded = pos_embed_fn(xyz) #B*n_head, 3*2*10
             if cfg.canonical_mlp.view_dir:
                 dir_embed = dir_embed_fn(dir_)
             else:
                 dir_embed = None
             raws += [self.cnl_mlp(
-                        pos_embed=xyz_embedded, dir_embed=dir_embed)]
+                        pos_embed=xyz_embedded, dir_embed=dir_embed, 
+                        head_id=head_id_expanded)]
 
         output = {}
         output['raws'] = torch.cat(raws, dim=0).to(cfg.primary_gpus[0])
@@ -313,7 +327,7 @@ class Network(nn.Module):
             non_rigid_pos_embed_fn,
             dir_embed_fn,
             non_rigid_mlp_input=None,
-            bgcolor=None,
+            bgcolor=None, head_id=None,
             **_):
         
         N_rays = ray_batch.shape[0]
@@ -343,7 +357,8 @@ class Network(nn.Module):
                                 pos_embed_fn=pos_embed_fn,
                                 non_rigid_pos_embed_fn=non_rigid_pos_embed_fn,
                                 dir_embed_fn=dir_embed_fn,
-                                dir_xyz=dir_xyz)
+                                dir_xyz=dir_xyz,
+                                head_id=head_id)
         raw = query_result['raws']
         
         rgb_map, acc_map, _, depth_map = \

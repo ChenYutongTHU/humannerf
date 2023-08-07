@@ -174,6 +174,19 @@ class Dataset(torch.utils.data.Dataset):
         results = {
             'frame_name': frame_name
         }
+        self.ray_shoot_mode='image'
+        if cfg.multihead.split == 'view':
+            if self.ray_shoot_mode=='image':
+                if cfg.test.head_id == -1: #auto
+                    view_id = self.parse_view_from_frame(frame_name)
+                    results['head_id'] = self.views.index(view_id)
+                else:
+                    results['head_id'] = int(cfg.test.head_id)
+            elif self.ray_shoot_mode=='patch': #training
+                view_id = self.parse_view_from_frame(frame_name)
+                results['head_id'] = self.views.index(view_id)
+            else:
+                raise ValueError
 
         bgcolor = np.array(self.bgcolor, dtype='float32')
 

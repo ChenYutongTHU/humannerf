@@ -173,9 +173,9 @@ class Trainer(object):
                     wandb.log(loss_dict)
 
             is_reload_model = False
-            if self.iter in [self.start_iter, 100, 300, 1000, 2500] or \
-                self.iter % cfg.progress.dump_interval == 0:
-                is_reload_model = self.progress()
+            if ((self.iter in [self.start_iter, 100, 300, 1000, 2500]) or \
+                self.iter % cfg.progress.dump_interval == 0) and self.iter!=1:
+                is_reload_model = self.progress() #if is_empty_Image keep_iter=1
 
             if not is_reload_model:
                 if self.iter % cfg.train.save_checkpt_interval == 0:
