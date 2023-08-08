@@ -65,7 +65,9 @@ def _freeview(
     #     dataset=cfg[render_folder_name].dataset)
 
     model.eval()
-    for batch in tqdm(test_loader):
+    step = 0
+    for batch in enumerate(test_loader):
+        step += 1
         for k, v in batch.items():
             batch[k] = v[0]
 
@@ -76,32 +78,35 @@ def _freeview(
         with torch.no_grad():
             net_output = model(**data, 
                                iter_val=cfg.eval_iter)
-
-        rgb = net_output['rgb']
-        alpha = net_output['alpha']
-
+        
+        multi_outputs = net_output['multi_outputs']
         width = batch['img_width']
         height = batch['img_height']
         ray_mask = batch['ray_mask']
-        target_rgbs = batch.get('target_rgbs', None)
-        raw_rgbs = batch.get('raw_rgbs', None)
 
-        rgb_img, alpha_img, _ = unpack_to_image(
-            width, height, ray_mask, np.array(cfg.bgcolor) / 255.,
-            rgb.data.cpu().numpy(),
-            alpha.data.cpu().numpy())
-
-        imgs = [rgb_img]
-        if cfg.show_truth and target_rgbs is not None:
-            raw_rgbs = to_8b_image(raw_rgbs.numpy())
-            imgs.append(raw_rgbs)
-        if cfg.show_alpha:
-            imgs.append(alpha_img)
-
-        img_out = np.concatenate(imgs, axis=1)
-
-        img_name = None#TODO 
-        writer.append(img_out, img_name=img_name)
+        if multi_outputs==True:
+            rgbs = net_output['rgb']
+            alphas = net_output['alpha']
+            img_names = [f'{step:06d}_head{i}' for i,_ in enumerate(rgbs)]             
+        else:
+            rgbs = [net_output['rgb']]
+            alphas = [net_output['alpha']]
+            img_names = [None]            
+        for rgb, alpha, img_name in zip(rgbs, alphas, img_names):
+            target_rgbs = batch.get('target_rgbs', None)
+            raw_rgbs = batch.get('raw_rgbs', None)
+            rgb_img, alpha_img, _ = unpack_to_image(
+                width, height, ray_mask, np.array(cfg.bgcolor) / 255.,
+                rgb.data.cpu().numpy(),
+                alpha.data.cpu().numpy())
+            imgs = [rgb_img]
+            if cfg.show_truth and target_rgbs is not None:
+                raw_rgbs = to_8b_image(raw_rgbs.numpy())
+                imgs.append(raw_rgbs)
+            if cfg.show_alpha:
+                imgs.append(alpha_img)
+            img_out = np.concatenate(imgs, axis=1)
+            writer.append(img_out, img_name=img_name)
         #metrics_writer.append(name=img_name, pred=rgb_img, target=raw_rgbs)
 
     writer.finalize()

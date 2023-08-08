@@ -80,17 +80,34 @@ class NonRigidMotionMLP(nn.Module):
                 h = torch.cat([h, pos_embed], dim=-1)
             h = self.block_mlps[i](h)
         trans = h
-
+        multi_outputs = False
         if self.multihead_enable:
             head_id = head_id[0,0]
-            if self.multihead_depth==1: #legacy
-                trans = trans[:,head_id*3:(head_id+1)*3]
+            if head_id==-1: #all head
+                #replicate pos_xyz  first
+                if self.multihead_depth==1: #legacy #B, num_head*3
+                    trans = torch.split(trans, 3, dim=1)
+                else:
+                    trans_ = []
+                    for head_id in range(self.multihead_num):
+                        trans_.append(self.multihead_mlp(trans, head_id=head_id))    #B, 3
+                    trans = trans_ #[B,3]     
+                multi_outputs = True
             else:
-                trans = self.multihead_mlp(trans, head_id=head_id)
+                if self.multihead_depth==1: #legacy
+                    trans = trans[:,head_id*3:(head_id+1)*3]
+                else:
+                    trans = self.multihead_mlp(trans, head_id=head_id)
         
 
-        result = {
-            'xyz': pos_xyz + trans,
-            'offsets': trans
-        }          
-        return result
+        if multi_outputs==True:
+            result = {
+                'xyz': [pos_xyz + t for t in trans],
+                'offsets': trans
+            }          
+        else:
+            result = {
+                'xyz': pos_xyz + trans,
+                'offsets': trans
+            }                   
+        return result, multi_outputs

@@ -177,9 +177,12 @@ class Dataset(torch.utils.data.Dataset):
         self.ray_shoot_mode='image'
         if cfg.multihead.split == 'view':
             if self.ray_shoot_mode=='image':
-                if cfg.test.head_id == -1: #auto
+                if cfg.test.head_id == -1: #multiple outputs
+                    results['head_id'] = int(cfg.test.head_id)
+                    '''
                     view_id = self.parse_view_from_frame(frame_name)
                     results['head_id'] = self.views.index(view_id)
+                    '''
                 else:
                     results['head_id'] = int(cfg.test.head_id)
             elif self.ray_shoot_mode=='patch': #training

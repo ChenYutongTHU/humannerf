@@ -73,7 +73,7 @@ class CanonicalMLP(nn.Module):
 
 
     def forward(self, pos_embed, dir_embed=None, head_id=None, **_):
-        h = pos_embed
+        h = pos_embed # B(*n_head), dim
         for i, _ in enumerate(self.pts_linears):
             if i in self.layers_to_cat_input:
                 h = torch.cat([pos_embed, h], dim=-1)
@@ -88,6 +88,7 @@ class CanonicalMLP(nn.Module):
         else:
             if self.multihead_enable:
                 head_id = head_id[0,0]
+                assert head_id>=0, head_id
                 if self.multihead_depth==1:
                     outputs = self.output_linear(h)
                     outputs = outputs[:,4*head_id:4*(head_id+1)]

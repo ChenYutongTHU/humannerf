@@ -133,8 +133,11 @@ class Dataset(torch.utils.data.Dataset):
 
         if cfg.multihead.split == 'view':
             if cfg.test.head_id == -1: #auto
+                results['head_id'] = int(cfg.test.head_id) #multiple outputs
+                '''
                 view_id = self.parse_view_from_frame(frame_name)
                 results['head_id'] = self.views.index(view_id)
+                '''
             else:
                 results['head_id'] = int(cfg.test.head_id)
         else:

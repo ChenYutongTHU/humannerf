@@ -333,16 +333,29 @@ class Dataset(torch.utils.data.Dataset):
 
         if cfg.multihead.split == 'view':
             if self.ray_shoot_mode=='image':
-                if cfg.test.head_id == -1: #auto
+                if cfg.test.head_id == -1: #multiple outputs
+                    results['head_id'] = int(cfg.test.head_id)
+                    '''
                     view_id = self.parse_view_from_frame(frame_name)
                     results['head_id'] = self.views.index(view_id)
+                    '''
                 else:
                     results['head_id'] = int(cfg.test.head_id)
             elif self.ray_shoot_mode=='patch': #training
                 view_id = self.parse_view_from_frame(frame_name)
                 results['head_id'] = self.views.index(view_id)
             else:
-                raise ValueError
+                raise 
+        elif cfg.multihead.split == 'argmin':
+            if self.ray_shoot_mode=='image':
+                if cfg.test.head_id == -1: #auto
+                    raise ValueError
+                else:
+                    results['head_id'] = int(cfg.test.head_id)
+            elif self.ray_shoot_mode=='patch': #training
+                results['head_id'] = -1 #all
+            else:
+                raise             
 
         if self.bgcolor is None:
             bgcolor = (np.random.rand(3) * 255.).astype('float32')

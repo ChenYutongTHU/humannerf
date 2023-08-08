@@ -103,7 +103,23 @@ class Trainer(object):
         lossweights = {k:v for k,v in cfg.train.lossweights.items() if v>0 }
         loss_names = list(lossweights.keys())
 
-        rgb = net_output['rgb']
+        rgb = net_output['rgb'] # (,3)
+
+        print('DEBUG rgb.shape', rgb.shape)
+        if net_output['multi_outputs']:
+            assert type(rgb)==list and len(rgb) == cfg.multihead.head_num, len(rgb)
+            losses_head = []
+            with torch.no_grad():
+                for rgb_head in rgb:
+                    lossweights = self.get_img_rebuild_loss(loss_names, 
+                            _unpack_imgs(rgb_head, patch_masks, bgcolor,
+                                        targets, div_indices), 
+                            targets)
+                    losses_head.append(sum([
+                        weight * losses[k] for k, weight in lossweights.items()
+                    ]))
+            best_head = np.argmin(losses_head)
+            rgb = rgb[best_head]
         losses = self.get_img_rebuild_loss(
                         loss_names, 
                         _unpack_imgs(rgb, patch_masks, bgcolor,
