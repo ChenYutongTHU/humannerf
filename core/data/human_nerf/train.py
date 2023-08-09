@@ -349,7 +349,8 @@ class Dataset(torch.utils.data.Dataset):
         elif cfg.multihead.split == 'argmin':
             if self.ray_shoot_mode=='image':
                 if cfg.test.head_id == -1: #auto
-                    raise ValueError
+                    #raise ValueError
+                    results['head_id'] = int(cfg.test.head_id)
                 else:
                     results['head_id'] = int(cfg.test.head_id)
             elif self.ray_shoot_mode=='patch': #training

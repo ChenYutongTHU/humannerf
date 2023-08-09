@@ -79,7 +79,7 @@ def _freeview(
             net_output = model(**data, 
                                iter_val=cfg.eval_iter)
         
-        multi_outputs = net_output['multi_outputs']
+        multi_outputs = (type(net_output['rgb'])==list)
         width = batch['img_width']
         height = batch['img_height']
         ray_mask = batch['ray_mask']

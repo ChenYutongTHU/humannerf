@@ -62,7 +62,7 @@ class CanonicalMLP(nn.Module):
                 self.output_linear = nn.Sequential(*output_list)
                 '''
                 if multihead_depth==1:
-                    self.output_linear = nn.Sequential([nn.Linear(mlp_width, 4*self.multihead_num)])
+                    self.output_linear = nn.Sequential(nn.Linear(mlp_width, 4*self.multihead_num))
                 else:
                     self.multihead_mlp = MultiheadMlp(multihead_depth, multihead_num, mlp_width, 4)
                     self.output_linear = None
@@ -80,6 +80,7 @@ class CanonicalMLP(nn.Module):
             h = self.pts_linears[i](h)
 
         if self.view_dir:
+            assert not self.multihead_enable
             density = self.output_linear_density(h)
             feature = self.output_linear_rgb_1(h) #N,D
             feature_dir = torch.cat([feature, dir_embed],dim=1)
@@ -88,12 +89,18 @@ class CanonicalMLP(nn.Module):
         else:
             if self.multihead_enable:
                 head_id = head_id[0,0]
-                assert head_id>=0, head_id
-                if self.multihead_depth==1:
-                    outputs = self.output_linear(h)
-                    outputs = outputs[:,4*head_id:4*(head_id+1)]
+                if head_id == -1:
+                    if self.multihead_depth==1:
+                        outputs = self.output_linear(h)
+                        outputs = [outputs[...,4*hid:4*(hid+1)] for hid in range(self.multihead_num)] #outputs[...,4*head_id:4*(head_id+1)]
+                    else:
+                        outputs = [self.multihead_mlp(h, hid) for hid in range(self.multihead_num)]                  
                 else:
-                    outputs = self.multihead_mlp(h, head_id)
+                    if self.multihead_depth==1:
+                        outputs = self.output_linear(h)
+                        outputs = outputs[...,4*head_id:4*(head_id+1)]
+                    else:
+                        outputs = self.multihead_mlp(h, head_id)
             else:
                 outputs = self.output_linear(h)
         return outputs    

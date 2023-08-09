@@ -110,4 +110,4 @@ class NonRigidMotionMLP(nn.Module):
                 'xyz': pos_xyz + trans,
                 'offsets': trans
             }                   
-        return result, multi_outputs
+        return result

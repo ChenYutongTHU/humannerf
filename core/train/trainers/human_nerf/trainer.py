@@ -104,22 +104,25 @@ class Trainer(object):
         loss_names = list(lossweights.keys())
 
         rgb = net_output['rgb'] # (,3)
-
-        print('DEBUG rgb.shape', rgb.shape)
-        if net_output['multi_outputs']:
+        return_losses = {}
+        multi_outputs = (type(rgb)==list)
+        if multi_outputs and cfg.multihead.split=='argmin':
             assert type(rgb)==list and len(rgb) == cfg.multihead.head_num, len(rgb)
             losses_head = []
             with torch.no_grad():
-                for rgb_head in rgb:
-                    lossweights = self.get_img_rebuild_loss(loss_names, 
+                for hid, rgb_head in enumerate(rgb):
+                    losses = self.get_img_rebuild_loss(loss_names, 
                             _unpack_imgs(rgb_head, patch_masks, bgcolor,
                                         targets, div_indices), 
                             targets)
-                    losses_head.append(sum([
+                    train_losses = [
                         weight * losses[k] for k, weight in lossweights.items()
-                    ]))
-            best_head = np.argmin(losses_head)
+                    ]
+                    losses_head.append(sum(train_losses).item())
+                    return_losses = {**return_losses,**{loss_names[i]+f'_head{hid}': train_losses[i] for i in range(len(loss_names))}}
+                best_head = np.argmin(losses_head)
             rgb = rgb[best_head]
+
         losses = self.get_img_rebuild_loss(
                         loss_names, 
                         _unpack_imgs(rgb, patch_masks, bgcolor,
@@ -129,9 +132,10 @@ class Trainer(object):
         train_losses = [
             weight * losses[k] for k, weight in lossweights.items()
         ]
+        return_losses = {**return_losses, **{loss_names[i]: train_losses[i] for i in range(len(loss_names))}}
 
         return sum(train_losses), \
-               {loss_names[i]: train_losses[i] for i in range(len(loss_names))}
+                return_losses
 
     def train_begin(self, train_dataloader):
         assert train_dataloader.batch_size == 1
@@ -224,7 +228,7 @@ class Trainer(object):
 
         print('Evaluate Progress Images ...') #TODO quantitative evaluation
 
-        images = []
+        images, images_list = [], [[] for _ in range(cfg.multihead.head_num)] #for multi_head
         is_empty_img = False
         for _, batch in enumerate(tqdm(self.prog_dataloader)):
 
@@ -236,12 +240,6 @@ class Trainer(object):
             height = batch['img_height']
             ray_mask = batch['ray_mask']
 
-            rendered = np.full(
-                        (height * width, 3), np.array(cfg.bgcolor)/255., 
-                        dtype='float32')
-            truth = np.full(
-                        (height * width, 3), np.array(cfg.bgcolor)/255., 
-                        dtype='float32')
 
             batch['iter_val'] = torch.full((1,), self.iter)
             data = cpu_data_to_gpu(
@@ -249,30 +247,55 @@ class Trainer(object):
             with torch.no_grad():
                 net_output = self.network(**data)
 
-            rgb = net_output['rgb'].data.to("cpu").numpy()
-            target_rgbs = batch['target_rgbs']
+            multi_outputs = (type(net_output['rgb'])==list)
+            if multi_outputs:
+                rgbs = [rgb.data.to("cpu").numpy() for rgb in net_output['rgb']]
+            else:
+                rgbs = [net_output['rgb'].data.to("cpu").numpy()]
+            
+            for head_id, rgb in enumerate(rgbs):
+                target_rgbs = batch['target_rgbs']
+                rendered = np.full(
+                            (height * width, 3), np.array(cfg.bgcolor)/255., 
+                            dtype='float32')
+                truth = np.full(
+                            (height * width, 3), np.array(cfg.bgcolor)/255., 
+                            dtype='float32')
+                            
+                rendered[ray_mask] = rgb
+                truth[ray_mask] = target_rgbs
 
-            rendered[ray_mask] = rgb
-            truth[ray_mask] = target_rgbs
+                truth = to_8b_image(truth.reshape((height, width, -1)))
+                rendered = to_8b_image(rendered.reshape((height, width, -1)))
+                if multi_outputs:
+                    images_list[head_id].append(np.concatenate([rendered, truth], axis=1))
+                else:
+                    images.append(np.concatenate([rendered, truth], axis=1))
 
-            truth = to_8b_image(truth.reshape((height, width, -1)))
-            rendered = to_8b_image(rendered.reshape((height, width, -1)))
-            images.append(np.concatenate([rendered, truth], axis=1))
-
-             # check if we create empty images (only at the begining of training)
+            # check if we create empty images (only at the begining of training)
+            
             if self.iter <= 5000 and \
                 np.allclose(rendered, np.array(cfg.bgcolor), atol=5.):
                 is_empty_img = True
-                break
+                #break
+            
 
-        tiled_image = tile_images(images)
+        if multi_outputs:
+            for head_id, images in enumerate(images_list):
+                tiled_image = tile_images(images)
+                Image.fromarray(tiled_image).save(
+                    os.path.join(cfg.logdir, "prog_{:06}_head{:01}.jpg".format(self.iter, head_id)))                
+        else: 
+            tiled_image = tile_images(images)
+            Image.fromarray(tiled_image).save(
+                os.path.join(cfg.logdir, "prog_{:06}.jpg".format(self.iter)))
+
         
-        Image.fromarray(tiled_image).save(
-            os.path.join(cfg.logdir, "prog_{:06}.jpg".format(self.iter)))
-
         if is_empty_img:
-            print("Produce empty images; reload the init model.")
-            self.load_ckpt('init')
+            #print("Produce empty images; reload the init model.")
+            print("Produce empty images; ")
+            #self.load_ckpt('init')
+
             
         self.progress_end()
 

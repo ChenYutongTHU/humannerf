@@ -179,7 +179,7 @@ class Network(nn.Module):
             head_id_expanded = self._expand_input(head_id[None, None, ...], total_elem)
             if not cfg.ignore_non_rigid_motions:
                 non_rigid_embed_xyz = non_rigid_pos_embed_fn(xyz)
-                result, multi_outputs = self.non_rigid_mlp(
+                result = self.non_rigid_mlp(
                     pos_embed=non_rigid_embed_xyz,
                     pos_xyz=xyz,
                     condition_code=self._expand_input(non_rigid_mlp_input, total_elem),
@@ -193,16 +193,21 @@ class Network(nn.Module):
                 dir_embed = None
 
             if head_id.min()==-1: #multiple outputs
-                if not cfg.ignore_non_rigid_motions:
-                    assert type(xyz)==list
+                if type(xyz) == list:
+                    assert len(xyz) == cfg.multihead.head_num
+                    for head_id_, xyz_ in enumerate(xyz):
+                        xyz_embedded = pos_embed_fn(xyz_) #B*n_head (if argmin), 3*2*10 
+                        new_head_id_expanded = torch.ones_like(head_id_expanded)*head_id_
+                        raws_list[head_id_] += [self.cnl_mlp(
+                                    pos_embed=xyz_embedded, dir_embed=dir_embed, 
+                                    head_id=new_head_id_expanded)] #N*num_head, 4                     
                 else:
-                    xyz = [xyz for i in range(cfg.multihead.head_num)]
-                for head_id_, xyz_ in enumerate(xyz):
-                    xyz_embedded = pos_embed_fn(xyz_) #B*n_head (if argmin), 3*2*10 
-                    new_head_id_expanded = torch.ones_like(head_id_expanded)*head_id_
-                    raws_list[head_id_] += [self.cnl_mlp(
+                    xyz_embedded = pos_embed_fn(xyz) #B*n_head (if argmin), 3*2*10 
+                    raws_list_ = self.cnl_mlp(
                                 pos_embed=xyz_embedded, dir_embed=dir_embed, 
-                                head_id=new_head_id_expanded)] #N*num_head, 4                            
+                                head_id=head_id_expanded) #N*num_head, 4  
+                    for head_id_, o in enumerate(raws_list_):
+                        raws_list[head_id_].append(o)                           
             else:
                 xyz_embedded = pos_embed_fn(xyz) #B*n_head (if argmin), 3*2*10
                 raws += [self.cnl_mlp(
@@ -222,10 +227,10 @@ class Network(nn.Module):
         all_ret = {}
         multi_outputs = False
         for i in range(0, rays_flat.shape[0], cfg.chunk):
-            ret, multi_outputs = self._render_rays(rays_flat[i:i+cfg.chunk], **kwargs)
+            ret = self._render_rays(rays_flat[i:i+cfg.chunk], **kwargs)
             for k in ret: #rgb, depth
-                if multi_outputs:
-                    assert type(ret[k])==list
+                if type(ret[k])==list:
+                    multi_outputs = True
                     if k not in all_ret:
                         if multi_outputs:
                             all_ret[k] = [[] for _ in range(cfg.multihead.head_num)] 
@@ -235,12 +240,11 @@ class Network(nn.Module):
                     if k not in all_ret:
                         all_ret[k] = []
                     all_ret[k].append(ret[k]) 
-
         if multi_outputs:
             all_ret = {k : [torch.cat(x, 0) for x in all_ret[k]] for k in all_ret} #'rgb':[tensor1-for head0, tensor2]
         else:
             all_ret = {k : torch.cat(all_ret[k], 0) for k in all_ret} 
-        return all_ret, multi_outputs
+        return all_ret
 
 
     @staticmethod
@@ -409,15 +413,15 @@ class Network(nn.Module):
                 rgb_map.append(rgb_map_head) 
                 acc_map.append(acc_map_head)
                 depth_map.append(depth_map_head)
-            multi_outputs = True          
+            #multi_outputs = True          
         else:
             rgb_map, acc_map, _, depth_map = \
                 self._raw2outputs(raw, pts_mask, z_vals, rays_d, bgcolor) #[N_rays, 3]
-            multi_outputs = False
+            #multi_outputs = False
 
         return {'rgb' : rgb_map,  
                 'alpha' : acc_map, 
-                'depth': depth_map}, multi_outputs
+                'depth': depth_map}#, multi_outputs
 
 
     def _get_motion_base(self, dst_Rs, dst_Ts, cnl_gtfms):
@@ -504,15 +508,12 @@ class Network(nn.Module):
         rays_d = torch.reshape(rays_d, [-1,3]).float()
         packed_ray_infos = torch.cat([rays_o, rays_d, near, far], -1)
 
-        all_ret, multi_outputs = self._batchify_rays(packed_ray_infos, **kwargs)
+        all_ret = self._batchify_rays(packed_ray_infos, **kwargs)
         for k in all_ret:
-            if multi_outputs:
-                assert type(all_ret[k])==list
-                k_shape = list(rays_shape[:-1]) + list(all_ret[k][0].shape[1:])  #3, (num_head?)
-                all_ret[k] = [torch.reshape(x, k_shape) for x in all_ret[k]]
+            if type(all_ret[k])==list:
+                all_ret[k] = [torch.reshape(x, list(rays_shape[:-1])+list(x.shape[1:])) for x in all_ret[k]] #merge from all gpus
             else:
                 k_shape = list(rays_shape[:-1]) + list(all_ret[k].shape[1:])  #3, (num_head?)
                 all_ret[k] = torch.reshape(all_ret[k], k_shape)
 
-        all_ret['multi_outputs'] = multi_outputs
         return all_ret
