@@ -99,8 +99,14 @@ train:
     lpips: 1.0
     mse: 0.2
     l1: 0.0
+
 test:
   head_id: -1
+
+train_render:
+  batch_size: 1
+  shuffle: False
+  drop_last: False
 
 progress:
   batch_size: 1

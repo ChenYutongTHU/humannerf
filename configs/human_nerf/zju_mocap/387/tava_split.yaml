@@ -9,6 +9,10 @@ train:
   dataset_module: 'core.data.human_nerf.train'
   dataset: 'zju_387_tava_train'
 
+train_render:
+  dataset_module: 'core.data.human_nerf.train'
+  dataset: 'zju_387_tava_train_render'
+
 progress:
   dataset_module: 'core.data.human_nerf.train'
   dataset: 'zju_387_tava_test'

@@ -147,6 +147,9 @@ def run_novelpose_eval():
     cfg.show_truth = True
     run_movement(render_folder_name='novelpose_eval')
 
+def run_train_render():
+    run_movement(render_folder_name='train_render')
+
 def run_movement(render_folder_name='movement'):
     cfg.perturb = 0.
     cfg.show_truth = True
