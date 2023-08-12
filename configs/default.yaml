@@ -177,6 +177,15 @@ lpips:
 
 multihead:
   split: view
-  head_num: 4
+  head_num: 1
+  argmin_cfg:
+    selector_criteria: 
+      lpips: 1.0
+      mse: 0.2
+      ssim: 0.0 #
+    unselected_lossweights: # for those unselected head
+      lpips: 0.0
+      mse: 0.0
+
 
 

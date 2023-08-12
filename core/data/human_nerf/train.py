@@ -356,7 +356,18 @@ class Dataset(torch.utils.data.Dataset):
             elif self.ray_shoot_mode=='patch': #training
                 results['head_id'] = -1 #all
             else:
-                raise             
+                raise   
+        elif cfg.multihead.split == 'random':
+            if self.ray_shoot_mode=='image':
+                if cfg.test.head_id == -1: #auto
+                    #raise ValueError
+                    results['head_id'] = int(cfg.test.head_id)
+                else:
+                    results['head_id'] = int(cfg.test.head_id)
+            elif self.ray_shoot_mode=='patch': #training
+                results['head_id'] = np.random.randint(cfg.multihead.head_num)
+            else:
+                raise                       
 
         if self.bgcolor is None:
             bgcolor = (np.random.rand(3) * 255.).astype('float32')

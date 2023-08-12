@@ -8,9 +8,9 @@ class DatasetArgs(object):
     if cfg.category == 'human_nerf' and cfg.task == 'zju_mocap':
         for sub in subjects:
             dataset_attrs.update({
-                f"zju_{sub}_test_fr-tv_vw-all":{
+                f"zju_{sub}_test_fr-tv_vw-novel-all":{
                     "source_path": f"data/zju/CoreView_{sub}",
-                    "dataset_path": f"dataset/zju_mocap/{sub}_fr-tv_vw-all",
+                    "dataset_path": f"dataset/zju_mocap/{sub}_fr-tv_vw-novel-all",
                     "keyfilter": cfg.test_keyfilter,
                     "ray_shoot_mode": 'image',
                     "src_type": 'zju_mocap',

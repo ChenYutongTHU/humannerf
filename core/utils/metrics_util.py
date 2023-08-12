@@ -2,13 +2,12 @@ import os, torch, numpy as np
 import torch.nn as nn
 from third_parties.lpips import LPIPS
 from core.utils.network_util import set_requires_grad
-from core.train.trainers.human_nerf.trainer import scale_for_lpips
 from configs import cfg
 from skimage.metrics import structural_similarity
 from collections import defaultdict
 
 class MetricsWriter(object):
-    def __init__(self, output_dir, exp_name, dataset):
+    def __init__(self, output_dir, exp_name, dataset, lpips_computer=None):
         os.makedirs(output_dir, exist_ok=True)
         self.per_img_f = open(os.path.join(output_dir, f'{exp_name}-metrics.perimg.txt'),'a')
         self.average_f = open(os.path.join(output_dir, f'{exp_name}-metrics.average.txt'),'a')
@@ -18,7 +17,10 @@ class MetricsWriter(object):
         self.name2metrics = {}
         self.metrics2ave = defaultdict(int)
 
-        self.lpips_computer = LpipsComputer()
+        if lpips_computer==None:
+            self.lpips_computer = LpipsComputer()
+        else:
+            self.lpips_computer = lpips_computer
         self.metrics_func = {
             "psnr": lambda pred, target, mask: compute_psnr(pred, target, mask).item(),
             "lpips": lambda pred, target, mask: 1000*self.lpips_computer.compute_lpips(pred=pred.cuda(), target=target.cuda()).item(), 
@@ -62,6 +64,7 @@ class LpipsComputer(object):
         self.lpips = self.lpips.cuda() #nn.DataParallel(self.lpips).cuda()
         return
     def compute_lpips(self, pred, target):
+        from core.train.trainers.human_nerf.trainer import scale_for_lpips
         if pred.dim()==3:
             pred, target = pred[None,...], target[None,...]
         with torch.no_grad():
@@ -85,7 +88,7 @@ def compute_psnr(pred, target, mask=None):
 def compute_ssim(pred, target, mask=None):
     """Computes Masked SSIM following the neuralbody paper."""
     # 0~1
-    assert pred.shape == target.shape and pred.shape[-1] == 3
+    assert pred.shape == target.shape #and pred.shape[-1] == 3
     if mask is not None:
         x, y, w, h = cv2.boundingRect(mask.cpu().numpy().astype(np.uint8))
         pred = pred[y : y + h, x : x + w]

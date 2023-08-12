@@ -8,7 +8,7 @@ import wandb, os
 
 def init_wandb():
     wandb.login(key='5421ff43bf1e3a6e19103432d161c885d4bbeda8')
-    wandb_run = wandb.init(project='HumanNerf', config=cfg, resume=cfg.resume)
+    wandb_run = wandb.init(project='HumanNerf', config=cfg, resume=cfg.resume, dir=cfg.logdir)
     wandb.run.name = '/'.join(cfg.logdir.split('/')[-2:])
     wandb.run.save()
     return wandb_run

@@ -11,6 +11,7 @@ from third_parties.lpips import LPIPS
 from core.train import create_lr_updater
 from core.data import create_dataloader
 from core.utils.network_util import set_requires_grad
+from core.utils.metrics_util import compute_ssim
 from core.utils.train_util import cpu_data_to_gpu, Timer
 from core.utils.image_util import tile_images, to_8b_image
 
@@ -91,7 +92,7 @@ class Trainer(object):
             losses["l1"] = img2l1(rgb, target)
 
         if "lpips" in loss_names:
-            lpips_loss = self.lpips(scale_for_lpips(rgb.permute(0, 3, 1, 2)), 
+            lpips_loss = self.lpips(scale_for_lpips(rgb.permute(0, 3, 1, 2)), #B,H,W,C 
                                     scale_for_lpips(target.permute(0, 3, 1, 2)))
             losses["lpips"] = torch.mean(lpips_loss)
 
@@ -108,31 +109,53 @@ class Trainer(object):
         multi_outputs = (type(rgb)==list)
         if multi_outputs and cfg.multihead.split=='argmin':
             assert type(rgb)==list and len(rgb) == cfg.multihead.head_num, len(rgb)
-            losses_head = []
-            with torch.no_grad():
-                for hid, rgb_head in enumerate(rgb):
-                    losses = self.get_img_rebuild_loss(loss_names, 
-                            _unpack_imgs(rgb_head, patch_masks, bgcolor,
+            criteria_head, selected_losses, unselected_losses = [], [], []
+            for hid, rgb_head in enumerate(rgb):
+                patch_img = _unpack_imgs(rgb_head, patch_masks, bgcolor, targets, div_indices)
+                losses = self.get_img_rebuild_loss(loss_names, 
+                        patch_img, 
+                        targets)
+                selected_losses.append([
+                    weight * losses[k] for k, weight in lossweights.items()
+                ])
+                unselected_losses.append([
+                    weight * losses[k] for k, weight in cfg.multihead.argmin_cfg.unselected_lossweights.items()
+                ])
+                criteria = []
+                for k, weight in cfg.multihead.argmin_cfg.selector_criteria.items():
+                    if weight>0:
+                        if k=='ssim': 
+                            patch_img_view = patch_img.permute(1,2,3,0).reshape(patch_img.shape[1],patch_img.shape[2],-1) #H,W,C,B
+                            targets_view = targets.permute(1,2,3,0).reshape(targets.shape[1],targets.shape[2],-1) #H,W,C,B
+                            ssim = compute_ssim(pred=patch_img_view.detach(), target=targets_view.detach())
+                            criteria.append(-1*weight*ssim)
+                        else:
+                            criteria.append(weight*losses[k])
+
+                criteria_head.append(sum(criteria).item())
+                return_losses = {**return_losses,**{loss_names[i]+f'_head{hid}': selected_losses[-1][i] for i in range(len(loss_names))}}
+            
+            best_head = np.argmin(criteria_head)
+            rgb = rgb[best_head]
+            train_losses = selected_losses[best_head] # a list
+            return_losses = {**return_losses, **{loss_names[i]: train_losses[i] for i in range(len(loss_names))}}
+            return_losses['best_head'] = best_head
+            for head_id in range(cfg.multihead.head_num):
+                if head_id==best_head:
+                    continue
+                train_losses += unselected_losses[head_id] #already a list
+
+        else:
+            losses = self.get_img_rebuild_loss(
+                            loss_names, 
+                            _unpack_imgs(rgb, patch_masks, bgcolor,
                                         targets, div_indices), 
                             targets)
-                    train_losses = [
-                        weight * losses[k] for k, weight in lossweights.items()
-                    ]
-                    losses_head.append(sum(train_losses).item())
-                    return_losses = {**return_losses,**{loss_names[i]+f'_head{hid}': train_losses[i] for i in range(len(loss_names))}}
-                best_head = np.argmin(losses_head)
-            rgb = rgb[best_head]
+            train_losses = [
+                weight * losses[k] for k, weight in lossweights.items()
+            ]
+            return_losses = {**return_losses, **{loss_names[i]: train_losses[i] for i in range(len(loss_names))}}
 
-        losses = self.get_img_rebuild_loss(
-                        loss_names, 
-                        _unpack_imgs(rgb, patch_masks, bgcolor,
-                                     targets, div_indices), 
-                        targets)
-
-        train_losses = [
-            weight * losses[k] for k, weight in lossweights.items()
-        ]
-        return_losses = {**return_losses, **{loss_names[i]: train_losses[i] for i in range(len(loss_names))}}
 
         return sum(train_losses), \
                 return_losses
@@ -196,6 +219,7 @@ class Trainer(object):
             if ((self.iter in [self.start_iter, 100, 300, 1000, 2500]) or \
                 self.iter % cfg.progress.dump_interval == 0) and self.iter!=1:
                 is_reload_model = self.progress() #if is_empty_Image keep_iter=1
+                is_reload_model = False #do not reproduce image
 
             if not is_reload_model:
                 if self.iter % cfg.train.save_checkpt_interval == 0:

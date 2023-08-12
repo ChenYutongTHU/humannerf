@@ -35,7 +35,7 @@ novelview:
 
 novelview_all:
   dataset_module: 'core.data.human_nerf.train'
-  dataset: 'zju_387_test_fr-tv_vw-all'
+  dataset: 'zju_387_test_fr-tv_vw-novel-all'
 
 novelpose_eval:
   dataset_module: 'core.data.human_nerf.train'

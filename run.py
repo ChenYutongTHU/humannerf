@@ -152,13 +152,26 @@ def run_movement(render_folder_name='movement'):
     cfg.show_truth = True
     model = load_network()
     test_loader = create_dataloader(render_folder_name)
-    writer = ImageWriter(
-        output_dir=os.path.join(cfg.logdir, cfg.load_net+cfg.eval_output_tag),
-        exp_name=render_folder_name)
-    metrics_writer = MetricsWriter(
-        output_dir=os.path.join(cfg.logdir, cfg.load_net+cfg.eval_output_tag), 
-        exp_name=render_folder_name,
-        dataset=cfg[render_folder_name].dataset)
+    multi_outputs = (cfg.multihead.head_num>1 and cfg.test.head_id==-1)
+    if multi_outputs:
+        writer, metrics_writer = [], []
+        for i in range(cfg.multihead.head_num):
+            writer.append(ImageWriter(
+                output_dir=os.path.join(cfg.logdir, cfg.load_net+cfg.eval_output_tag+f'_h{i}'),
+                exp_name=render_folder_name))        
+            metrics_writer.append(MetricsWriter(
+                output_dir=os.path.join(cfg.logdir, cfg.load_net+cfg.eval_output_tag+f'_h{i}'), 
+                exp_name=render_folder_name,
+                dataset=cfg[render_folder_name].dataset, 
+                lpips_computer=metrics_writer[0].lpips_computer if i!=0 else None))       
+    else:
+        writer = ImageWriter(
+            output_dir=os.path.join(cfg.logdir, cfg.load_net+cfg.eval_output_tag),
+            exp_name=render_folder_name)
+        metrics_writer = MetricsWriter(
+            output_dir=os.path.join(cfg.logdir, cfg.load_net+cfg.eval_output_tag), 
+            exp_name=render_folder_name,
+            dataset=cfg[render_folder_name].dataset)
 
     model.eval()
     for idx, batch in enumerate(tqdm(test_loader)):
@@ -172,34 +185,50 @@ def run_movement(render_folder_name='movement'):
         with torch.no_grad():
             net_output = model(**data, iter_val=cfg.eval_iter)
 
-        rgb = net_output['rgb']
-        alpha = net_output['alpha']
+        if multi_outputs==True:
+            assert (type(net_output['rgb'])==list)
+            rgbs = net_output['rgb']
+            alphas = net_output['alpha']
+            img_names = [f'{idx:06d}_head{i}' for i,_ in enumerate(rgbs)]          
+        else:
+            rgbs = [net_output['rgb']]
+            alphas = [net_output['alpha']]
+            img_names = [None] 
 
-        width = batch['img_width']
-        height = batch['img_height']
-        ray_mask = batch['ray_mask']
+        for hid,(rgb, alpha, img_name) in enumerate(zip(rgbs, alphas, img_names)):
+            width = batch['img_width']
+            height = batch['img_height']
+            ray_mask = batch['ray_mask']
 
-        rgb_img, alpha_img, truth_img = \
-            unpack_to_image(
-                width, height, ray_mask, np.array(cfg.bgcolor)/255.,
-                rgb.data.cpu().numpy(),
-                alpha.data.cpu().numpy(),
-                batch['target_rgbs'])
+            rgb_img, alpha_img, truth_img = \
+                unpack_to_image(
+                    width, height, ray_mask, np.array(cfg.bgcolor)/255.,
+                    rgb.data.cpu().numpy(),
+                    alpha.data.cpu().numpy(),
+                    batch['target_rgbs'])
 
-        imgs = [rgb_img]
-        if cfg.show_truth:
-            imgs.append(truth_img)
-        if cfg.show_alpha:
-            imgs.append(alpha_img)
+            imgs = [rgb_img]
+            if cfg.show_truth:
+                imgs.append(truth_img)
+            if cfg.show_alpha:
+                imgs.append(alpha_img)
 
+            if multi_outputs:
+                metrics_writer[hid].append(name=batch['frame_name'], pred=rgb_img, target=truth_img, mask=None)
+                img_out = np.concatenate(imgs, axis=1)
+                writer[hid].append(img_out, img_name=batch['frame_name'].replace('/','-'))
+            else:
+                metrics_writer.append(name=batch['frame_name'], pred=rgb_img, target=truth_img, mask=None)
+                img_out = np.concatenate(imgs, axis=1)
+                writer.append(img_out, img_name=batch['frame_name'].replace('/','-'))
 
-        metrics_writer.append(name=batch['frame_name'], pred=rgb_img, target=truth_img, mask=None)
-        img_out = np.concatenate(imgs, axis=1)
-        writer.append(img_out, img_name=batch['frame_name'].replace('/','-'))
-
-
-    writer.finalize()
-    metrics_writer.finalize()
+    if multi_outputs:
+        for w,m in zip(writer, metrics_writer):
+            w.finalize()
+            m.finalize()
+    else:
+        writer.finalize()
+        metrics_writer.finalize()
     
         
 if __name__ == '__main__':

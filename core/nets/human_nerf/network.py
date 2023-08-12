@@ -162,7 +162,7 @@ class Network(nn.Module):
             dir_embed_fn,
             chunk, head_id):
 
-        if head_id==-1:
+        if cfg.canonical_mlp.multihead.enable and head_id==-1:
             raws_list = [[] for i in range(cfg.multihead.head_num)]
         else:
             raws = []
@@ -192,7 +192,7 @@ class Network(nn.Module):
             else:
                 dir_embed = None
 
-            if head_id.min()==-1: #multiple outputs
+            if cfg.canonical_mlp.multihead.enable and head_id.min()==-1: #multiple outputs
                 if type(xyz) == list:
                     assert len(xyz) == cfg.multihead.head_num
                     for head_id_, xyz_ in enumerate(xyz):
@@ -214,7 +214,7 @@ class Network(nn.Module):
                             pos_embed=xyz_embedded, dir_embed=dir_embed, 
                             head_id=head_id_expanded)] #N*num_head, 4
         
-        if head_id.min()==-1:
+        if cfg.canonical_mlp.multihead.enable  and head_id.min()==-1:
             raws_list = [torch.cat(raws, dim=0).to(cfg.primary_gpus[0]) for raws in raws_list] 
             output['raws'] = raws_list
         else:
