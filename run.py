@@ -29,6 +29,12 @@ def unpack_alpha_map(alpha_vals, ray_mask, width, height):
     alpha_map[ray_mask] = alpha_vals
     return alpha_map.reshape((height, width))
 
+def unpack_weight_map(weight_vals, ray_mask, width, height, weight_mask=None):
+    weight_map = np.zeros((height * width, weight_vals.shape[-1]), dtype='float32')
+    if weight_mask is not None:
+        weight_vals[weight_mask==False] = 0
+    weight_map[ray_mask,:] = weight_vals #(N,
+    return weight_map.reshape((height, width,-1))
 
 def unpack_to_image(width, height, ray_mask, bgcolor,
                     rgb, alpha, truth=None):
@@ -87,18 +93,20 @@ def _freeview(
         if multi_outputs==True:
             rgbs = net_output['rgb']
             alphas = net_output['alpha']
+            depths = net_output['depth']
             img_names = [f'{step:06d}_head{i}' for i,_ in enumerate(rgbs)]             
         else:
             rgbs = [net_output['rgb']]
             alphas = [net_output['alpha']]
+            depths = [net_output['depth']]
             img_names = [None]            
-        for rgb, alpha, img_name in zip(rgbs, alphas, img_names):
+        for rgb, alpha, depth, img_name in zip(rgbs, alphas, depths, img_names):
             target_rgbs = batch.get('target_rgbs', None)
             raw_rgbs = batch.get('raw_rgbs', None)
             rgb_img, alpha_img, _ = unpack_to_image(
                 width, height, ray_mask, np.array(cfg.bgcolor) / 255.,
-                rgb.data.cpu().numpy(),
-                alpha.data.cpu().numpy())
+                rgb.data.cpu().numpy(),)
+            depth_img = unpack_alpha_map(alpha_vals=depth, ray_mask=ray_mask, width=width, height=height)
             imgs = [rgb_img]
             if cfg.show_truth and target_rgbs is not None:
                 raw_rgbs = to_8b_image(raw_rgbs.numpy())
@@ -192,13 +200,20 @@ def run_movement(render_folder_name='movement'):
             assert (type(net_output['rgb'])==list)
             rgbs = net_output['rgb']
             alphas = net_output['alpha']
+            depths = net_output['depth']
+            weights = net_output['weights']
+            cnl_xyzs, cnl_rgbs, cnl_weights = net_output['cnl_xyz'],net_output['cnl_rgb'],net_output['cnl_weight']
             img_names = [f'{idx:06d}_head{i}' for i,_ in enumerate(rgbs)]          
         else:
             rgbs = [net_output['rgb']]
             alphas = [net_output['alpha']]
+            depths = [net_output['depth']]
+            weights = [net_output['weights']]
+            cnl_xyzs, cnl_rgbs, cnl_weights = [net_output['cnl_xyz']],[net_output['cnl_rgb']], [net_output['cnl_weight']]
             img_names = [None] 
 
-        for hid,(rgb, alpha, img_name) in enumerate(zip(rgbs, alphas, img_names)):
+        for hid,(rgb, alpha, depth, weight, cnl_xyz, cnl_rgb, cnl_weight, img_name) in \
+                enumerate(zip(rgbs, alphas, depths, weights, cnl_xyzs, cnl_rgbs, cnl_weights, img_names)):
             width = batch['img_width']
             height = batch['img_height']
             ray_mask = batch['ray_mask']
@@ -209,7 +224,7 @@ def run_movement(render_folder_name='movement'):
                     rgb.data.cpu().numpy(),
                     alpha.data.cpu().numpy(),
                     batch['target_rgbs'])
-
+            
             imgs = [rgb_img]
             if cfg.show_truth:
                 imgs.append(truth_img)
@@ -224,6 +239,25 @@ def run_movement(render_folder_name='movement'):
                 metrics_writer.append(name=batch['frame_name'], pred=rgb_img, target=truth_img, mask=None)
                 img_out = np.concatenate(imgs, axis=1)
                 writer.append(img_out, img_name=batch['frame_name'].replace('/','-'))
+            
+            #reproject to 3D image
+            '''
+            depth_img = unpack_alpha_map(alpha_vals=depth.data.cpu().numpy(), ray_mask=ray_mask, width=width, height=height)
+            weight_img = unpack_weight_map(weight_vals=weight.data.cpu().numpy(), ray_mask=ray_mask, width=width, height=height)
+            point_3ds, point_3ds_mask = test_loader.dataset.project_to_world3D(
+                depth_img, batch['frame_name'], height, width,
+                ray_mask=ray_mask, near=batch['near'], far=batch['far'])
+            writer.append_3d(point_3ds, point_3ds_mask, obj_name=batch['frame_name'].replace('/','-'), 
+                    weight_img=weight_img, depth_img=depth_img)
+            '''
+            
+            #back to 3d-canonical
+            #weight.argmax() -> rgb/density/(x,y,z)
+            if cfg.test.save_3d:
+                weight_mask = (cnl_weight>cfg.test.weight_threshold)
+                cnl_xyz, cnl_rgb = cnl_xyz[weight_mask].data.cpu().numpy(), cnl_rgb[weight_mask].data.cpu().numpy()
+                writer.append_cnl_3d(cnl_xyz, cnl_rgb, obj_name=batch['frame_name'].replace('/','-')+'-cnl')
+
 
     if multi_outputs:
         for w,m in zip(writer, metrics_writer):

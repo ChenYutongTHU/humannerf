@@ -54,15 +54,19 @@ def tile_images(images, imgs_per_row=4):
 class ImageWriter():
     def __init__(self, output_dir, exp_name):
         self.image_dir = os.path.join(output_dir, exp_name)
-
+        self.obj_dir = os.path.join(output_dir, exp_name+'_3d')
         print("The rendering is saved in " + \
               colored(self.image_dir, 'cyan'))
         
         # remove image dir if it exists
         if os.path.exists(self.image_dir):
             shutil.rmtree(self.image_dir)
+
+        if os.path.exists(self.obj_dir):
+            shutil.rmtree(self.obj_dir)       
         
         os.makedirs(self.image_dir, exist_ok=True)
+        os.makedirs(self.obj_dir, exist_ok=True)
         self.frame_idx = -1
         self.images_np = []
 
@@ -73,6 +77,29 @@ class ImageWriter():
         save_image(image, f'{self.image_dir}/{img_name}.png')
         self.images_np.append(image)
         return self.frame_idx, img_name
+    
+    def append_3d(self, point3d, mask, obj_name=None, weight_img=None, depth_img=None):
+        if obj_name is None:
+            obj_name = f"{self.frame_idx:06d}"
+        with open(os.path.join(self.obj_dir, f'{obj_name}.obj'),'w') as f:
+            us, vs = mask.nonzero()
+            for u,v in zip(us,vs):
+                xyz = point3d[u,v]
+                f.writelines(f'v {xyz[0]:.7f} {xyz[1]:.7f} {xyz[2]:.7f}\n')
+        if not weight_img is None:
+            np.save(os.path.join(self.obj_dir,f'{obj_name}-weights.npy'),weight_img)
+        if not depth_img is None:
+            np.save(os.path.join(self.obj_dir,f'{obj_name}-depth.npy'),depth_img)
+        return
+
+    def append_cnl_3d(self, cnl_xyz, cnl_rgb, obj_name=None):
+        if obj_name is None:
+            obj_name = f"{self.frame_idx:06d}-cnl"
+        with open(os.path.join(self.obj_dir, f'{obj_name}.obj'),'w') as f:
+            for xyz,rgb in zip(cnl_xyz,cnl_rgb):
+                f.writelines(f'v {xyz[0]:.7f} {xyz[1]:.7f} {xyz[2]:.7f} ')
+                f.writelines(f'{rgb[0]:.7f} {rgb[1]:.7f} {rgb[2]:.7f} \n')
+        return
 
     def finalize(self, video_name=None):
         #save_video

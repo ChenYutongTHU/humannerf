@@ -132,15 +132,21 @@ class Network(nn.Module):
         output = {}
 
         raws_flat = result['raws']
+        xyzs_flat = result['xyzs'] #batch, 3 or [(batch,3), (batch,3)]
         if type(raws_flat)==list:
             assert head_id.min()==-1, head_id
+            assert type(xyzs_flat)==list, len(xyzs_flat)==len(raws_flat)
             output['raws'] = [torch.reshape(
                                 raws_flat_, 
-                                list(pos_xyz.shape[:-1]) + [raws_flat_.shape[-1]]) for raws_flat_ in raws_flat]            
+                                list(pos_xyz.shape[:-1]) + [raws_flat_.shape[-1]]) for raws_flat_ in raws_flat]     
+            output['xyzs'] = [torch.reshape(xyzs_flat_, list(pos_xyz.shape[:-1]) + [xyzs_flat_.shape[-1]]) for xyzs_flat_ in xyzs_flat]       
         else:
             output['raws'] = torch.reshape(
                                 raws_flat, 
                                 list(pos_xyz.shape[:-1]) + [raws_flat.shape[-1]]) 
+            output['xyzs'] = torch.reshape(
+                                xyzs_flat, 
+                                list(pos_xyz.shape[:-1]) + [xyzs_flat.shape[-1]])                                
 
         return output
 
@@ -164,8 +170,10 @@ class Network(nn.Module):
 
         if cfg.canonical_mlp.multihead.enable and head_id==-1:
             raws_list = [[] for i in range(cfg.multihead.head_num)]
+            xyz_list = [[] for i in range(cfg.multihead.head_num)]
         else:
             raws = []
+            xyzs = []
         output = {}
         # iterate ray samples by trunks
         for i in range(0, pos_flat.shape[0], chunk):
@@ -186,7 +194,7 @@ class Network(nn.Module):
                     head_id=head_id_expanded
                 )
                 xyz = result['xyz'] #B, 3 or list
-
+            
             if cfg.canonical_mlp.view_dir:
                 dir_embed = dir_embed_fn(dir_)
             else:
@@ -198,6 +206,7 @@ class Network(nn.Module):
                     for head_id_, xyz_ in enumerate(xyz):
                         xyz_embedded = pos_embed_fn(xyz_) #B*n_head (if argmin), 3*2*10 
                         new_head_id_expanded = torch.ones_like(head_id_expanded)*head_id_
+                        xyz_list[head_id_].append(xyz_)
                         raws_list[head_id_] += [self.cnl_mlp(
                                     pos_embed=xyz_embedded, dir_embed=dir_embed, 
                                     head_id=new_head_id_expanded)] #N*num_head, 4                     
@@ -207,9 +216,11 @@ class Network(nn.Module):
                                 pos_embed=xyz_embedded, dir_embed=dir_embed, 
                                 head_id=head_id_expanded) #N*num_head, 4  
                     for head_id_, o in enumerate(raws_list_):
-                        raws_list[head_id_].append(o)                           
+                        raws_list[head_id_].append(o)     
+                        xyz_list[head_id_].append(xyz)                      
             else:
                 xyz_embedded = pos_embed_fn(xyz) #B*n_head (if argmin), 3*2*10
+                xyzs.append(xyz)
                 raws += [self.cnl_mlp(
                             pos_embed=xyz_embedded, dir_embed=dir_embed, 
                             head_id=head_id_expanded)] #N*num_head, 4
@@ -217,8 +228,11 @@ class Network(nn.Module):
         if cfg.canonical_mlp.multihead.enable  and head_id.min()==-1:
             raws_list = [torch.cat(raws, dim=0).to(cfg.primary_gpus[0]) for raws in raws_list] 
             output['raws'] = raws_list
+            xyz_list = [torch.cat(xyz, dim=0).to(cfg.primary_gpus[0]) for xyz in xyz_list]
+            output['xyzs'] = xyz_list
         else:
             output['raws'] = torch.cat(raws, dim=0).to(cfg.primary_gpus[0]) #N*num_head, 4
+            output['xyzs'] = torch.cat(xyzs, dim=0).to(cfg.primary_gpus[0])
 
         return output
 
@@ -248,7 +262,7 @@ class Network(nn.Module):
 
 
     @staticmethod
-    def _raw2outputs(raw, raw_mask, z_vals, rays_d, bgcolor=None):
+    def _raw2outputs(raw, raw_mask, z_vals, rays_d, xyz, bgcolor=None):
         def _raw2alpha(raw, dists, act_fn=F.relu):
             return 1.0 - torch.exp(-act_fn(raw)*dists)
 
@@ -261,19 +275,25 @@ class Network(nn.Module):
 
         rgb = torch.sigmoid(raw[...,:3])  # [N_rays, N_samples, 3]
         alpha = _raw2alpha(raw[...,3], dists)  # [N_rays, N_samples]
-        alpha = alpha * raw_mask[:, :, 0]
+        alpha = alpha * raw_mask[:, :, 0] #foreground probability
 
         weights = alpha * torch.cumprod(
             torch.cat([torch.ones((alpha.shape[0], 1)).to(alpha), 
-                       1.-alpha + 1e-10], dim=-1), dim=-1)[:, :-1]
-        rgb_map = torch.sum(weights[...,None] * rgb, -2)  # [N_rays, 3]
+                       1.-alpha + 1e-10], dim=-1), dim=-1)[:, :-1] #[N_rays, n_sample]
+        rgb_map = torch.sum(weights[...,None] * rgb, -2)  # [N_rays, n_samples, 3]
 
         depth_map = torch.sum(weights * z_vals, -1)
         acc_map = torch.sum(weights, -1)
 
         rgb_map = rgb_map + (1.-acc_map[...,None]) * bgcolor[None, :]/255.
 
-        return rgb_map, acc_map, weights, depth_map
+        #xyz [N_rays, n_sample, 3]
+        weights_max, indices = weights.max(dim=1) #N_rays
+        indices = indices[:,None,None] #N_rays, 1, 1
+        cnl_xyz = torch.gather(xyz, dim=1, index=indices.tile([1,1,xyz.shape[-1]]))
+        cnl_rgb = torch.gather(rgb, dim=1, index=indices.tile([1,1,rgb.shape[-1]]))
+
+        return rgb_map, acc_map, weights, depth_map, cnl_xyz.squeeze(1), cnl_rgb.squeeze(1), weights_max
 
 
     @staticmethod
@@ -394,7 +414,7 @@ class Network(nn.Module):
         cnl_pts = mv_output['x_skel']
 
         query_result = self._query_mlp(
-                                pos_xyz=cnl_pts,
+                                pos_xyz=cnl_pts, 
                                 non_rigid_mlp_input=non_rigid_mlp_input,
                                 pos_embed_fn=pos_embed_fn,
                                 non_rigid_pos_embed_fn=non_rigid_pos_embed_fn,
@@ -402,26 +422,35 @@ class Network(nn.Module):
                                 dir_xyz=dir_xyz,
                                 head_id=head_id)
         raw = query_result['raws']
+        xyz = query_result['xyzs']
         
         if type(raw)==list:
             assert cfg.canonical_mlp.multihead.enable==True and head_id.min()==-1
             rgb_map, acc_map, depth_map = [], [], []
-            for raw_head in raw:
+            cnl_xyz, cnl_rgb, cnl_weight = [], [], []
+            weights = []
+            for raw_head, xyz_head in zip(raw,xyz):
                 output_dim = 4
-                rgb_map_head, acc_map_head, _, depth_map_head = \
-                    self._raw2outputs(raw_head, pts_mask, z_vals, rays_d, bgcolor)   
+                rgb_map_head, acc_map_head, weights_head, depth_map_head, cnl_xyz_head, cnl_rgb_head, cnl_weight_head = \
+                    self._raw2outputs(raw_head, pts_mask, z_vals, rays_d, xyz_head, bgcolor)   
                 rgb_map.append(rgb_map_head) 
                 acc_map.append(acc_map_head)
                 depth_map.append(depth_map_head)
+                cnl_xyz.append(cnl_xyz_head)
+                cnl_rgb.append(cnl_rgb_head)
+                cnl_weight.append(cnl_weight_head)
+                weights.append(weights_head)
             #multi_outputs = True          
         else:
-            rgb_map, acc_map, _, depth_map = \
-                self._raw2outputs(raw, pts_mask, z_vals, rays_d, bgcolor) #[N_rays, 3]
+            rgb_map, acc_map, weights, depth_map, cnl_xyz, cnl_rgb, cnl_weight = \
+                self._raw2outputs(raw, pts_mask, z_vals, rays_d, xyz, bgcolor) #[N_rays, 3]
             #multi_outputs = False
 
         return {'rgb' : rgb_map,  
                 'alpha' : acc_map, 
-                'depth': depth_map}#, multi_outputs
+                'depth': depth_map,
+                'weights': weights,
+                'cnl_xyz':cnl_xyz, 'cnl_rgb':cnl_rgb, 'cnl_weight':cnl_weight}#, multi_outputs
 
 
     def _get_motion_base(self, dst_Rs, dst_Ts, cnl_gtfms):

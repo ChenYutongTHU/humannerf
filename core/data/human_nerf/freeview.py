@@ -190,6 +190,8 @@ class Dataset(torch.utils.data.Dataset):
                 results['head_id'] = self.views.index(view_id)
             else:
                 raise ValueError
+        else:
+            view_id = -1
 
         bgcolor = np.array(self.bgcolor, dtype='float32')
 

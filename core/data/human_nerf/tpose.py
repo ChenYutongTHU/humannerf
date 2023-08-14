@@ -140,8 +140,9 @@ class Dataset(torch.utils.data.Dataset):
                 '''
             else:
                 results['head_id'] = int(cfg.test.head_id)
+                raise  
         else:
-            raise ValueError
+            results['head_id'] = -1
 
         bgcolor = np.array(self.bgcolor, dtype='float32')
 

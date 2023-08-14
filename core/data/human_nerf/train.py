@@ -3,7 +3,7 @@ import pickle
 
 import numpy as np
 import cv2
-import torch
+import torch, json
 import torch.utils.data
 
 from core.utils.image_util import load_image, to_3ch_image
@@ -70,6 +70,11 @@ class Dataset(torch.utils.data.Dataset):
         self.bgcolor = bgcolor
 
         self.ray_shoot_mode = ray_shoot_mode
+
+        if os.path.isfile(cfg.multihead.split):
+            self.sample2head_id = json.load(open(cfg.multihead.split,'r'))
+        else:
+            self.sample2head_id = None
 
     def load_canonical_joints(self):
         cl_joint_path = os.path.join(self.dataset_path, 'canonical_joints.pkl')
@@ -294,6 +299,33 @@ class Dataset(torch.utils.data.Dataset):
     def get_total_frames(self):
         return len(self.framelist)
 
+
+    def project_to_world3D(self, depth_img, frame_name, H, W, ray_mask, near, far):
+        K = self.cameras[frame_name]['intrinsics'][:3, :3].copy()
+        K[:2] *= cfg.resize_img_scale
+        E = self.cameras[frame_name]['extrinsics']
+        dst_skel_info = self.query_dst_skeleton(frame_name)
+        E = apply_global_tfm_to_camera(
+                E=E, 
+                Rh=dst_skel_info['Rh'],
+                Th=dst_skel_info['Th'])
+        R = E[:3, :3]
+        T = E[:3, 3]
+        i, j = np.meshgrid(np.arange(W, dtype=np.float32),
+                        np.arange(H, dtype=np.float32),
+                        indexing='xy')
+        xy1 = np.stack([i, j, np.ones_like(i)], axis=2) #H,W,3
+        pixel_camera = np.dot(xy1, np.linalg.inv(K).T)*depth_img[...,None] #H,W,3 * H,W,1 
+        pixel_world = np.dot(pixel_camera - T.ravel(), R)
+        near_, far_ = np.ones((H*W),dtype=np.float32)*np.inf, np.zeros((H*W),dtype=np.float32)
+        #import ipdb; ipdb.set_trace()
+        near_[ray_mask], far_[ray_mask] = near.view(-1), far.view(-1)
+        near_, far_ = near_.reshape((H,W)), far_.reshape((H,W))
+        valid = (depth_img>near_)*(depth_img<far_)
+        return pixel_world, valid
+        
+
+
     def sample_patch_rays(self, img, H, W,
                           subject_mask, bbox_mask, ray_mask,
                           rays_o, rays_d, ray_img, near, far): #bbox_mask (512,512) = reshaped ray_mask (512*512,)
@@ -367,7 +399,22 @@ class Dataset(torch.utils.data.Dataset):
             elif self.ray_shoot_mode=='patch': #training
                 results['head_id'] = np.random.randint(cfg.multihead.head_num)
             else:
-                raise                       
+                raise   
+        elif os.path.isfile(cfg.multihead.split):
+            if self.ray_shoot_mode=='image':
+                if cfg.test.head_id == -1: #auto
+                    #raise ValueError
+                    results['head_id'] = int(cfg.test.head_id)
+                else:
+                    results['head_id'] = int(cfg.test.head_id)
+            elif self.ray_shoot_mode=='patch': #training
+                assert self.sample2head_id is not None
+                results['head_id'] = self.sample2head_id[frame_name]
+            else:
+                raise               
+
+
+
 
         if self.bgcolor is None:
             bgcolor = (np.random.rand(3) * 255.).astype('float32')

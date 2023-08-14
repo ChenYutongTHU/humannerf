@@ -102,6 +102,8 @@ train:
 
 test:
   head_id: -1
+  weight_threshold: 0.3
+  save_3d: False
 
 train_render:
   batch_size: 1
