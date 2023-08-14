@@ -286,14 +286,16 @@ class Network(nn.Module):
         acc_map = torch.sum(weights, -1)
 
         rgb_map = rgb_map + (1.-acc_map[...,None]) * bgcolor[None, :]/255.
-
+        
         #xyz [N_rays, n_sample, 3]
+        
+        
         weights_max, indices = weights.max(dim=1) #N_rays
         indices = indices[:,None,None] #N_rays, 1, 1
         cnl_xyz = torch.gather(xyz, dim=1, index=indices.tile([1,1,xyz.shape[-1]]))
         cnl_rgb = torch.gather(rgb, dim=1, index=indices.tile([1,1,rgb.shape[-1]]))
-
-        return rgb_map, acc_map, weights, depth_map, cnl_xyz.squeeze(1), cnl_rgb.squeeze(1), weights_max
+        return rgb_map, acc_map, weights, depth_map, cnl_xyz.squeeze(1), cnl_rgb.squeeze(1), weights_max, rgb
+        
 
 
     @staticmethod
@@ -429,10 +431,11 @@ class Network(nn.Module):
             rgb_map, acc_map, depth_map = [], [], []
             cnl_xyz, cnl_rgb, cnl_weight = [], [], []
             weights = []
+            rgb_on_rays = []
             for raw_head, xyz_head in zip(raw,xyz):
                 output_dim = 4
-                rgb_map_head, acc_map_head, weights_head, depth_map_head, cnl_xyz_head, cnl_rgb_head, cnl_weight_head = \
-                    self._raw2outputs(raw_head, pts_mask, z_vals, rays_d, xyz_head, bgcolor)   
+                rgb_map_head, acc_map_head, weights_head, depth_map_head, cnl_xyz_head, cnl_rgb_head, cnl_weight_head, rgb_on_rays_head = \
+                    self._raw2outputs(raw_head, pts_mask, z_vals, rays_d, xyz_head, bgcolor)     
                 rgb_map.append(rgb_map_head) 
                 acc_map.append(acc_map_head)
                 depth_map.append(depth_map_head)
@@ -440,16 +443,18 @@ class Network(nn.Module):
                 cnl_rgb.append(cnl_rgb_head)
                 cnl_weight.append(cnl_weight_head)
                 weights.append(weights_head)
+                rgb_on_rays.append(rgb_on_rays_head)
             #multi_outputs = True          
         else:
-            rgb_map, acc_map, weights, depth_map, cnl_xyz, cnl_rgb, cnl_weight = \
+            rgb_map, acc_map, weights, depth_map, cnl_xyz, cnl_rgb, cnl_weight, rgb_on_rays = \
                 self._raw2outputs(raw, pts_mask, z_vals, rays_d, xyz, bgcolor) #[N_rays, 3]
             #multi_outputs = False
 
         return {'rgb' : rgb_map,  
                 'alpha' : acc_map, 
                 'depth': depth_map,
-                'weights': weights,
+                'weights_on_rays': weights,
+                'xyz_on_rays': xyz, 'rgb_on_rays': rgb_on_rays, 
                 'cnl_xyz':cnl_xyz, 'cnl_rgb':cnl_rgb, 'cnl_weight':cnl_weight}#, multi_outputs
 
 

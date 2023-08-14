@@ -201,19 +201,19 @@ def run_movement(render_folder_name='movement'):
             rgbs = net_output['rgb']
             alphas = net_output['alpha']
             depths = net_output['depth']
-            weights = net_output['weights']
+            weights_on_rays, xyz_on_rays, rgb_on_rays = net_output['weights_on_rays'],net_output['xyz_on_rays'],net_output['rgb_on_rays']
             cnl_xyzs, cnl_rgbs, cnl_weights = net_output['cnl_xyz'],net_output['cnl_rgb'],net_output['cnl_weight']
             img_names = [f'{idx:06d}_head{i}' for i,_ in enumerate(rgbs)]          
         else:
             rgbs = [net_output['rgb']]
             alphas = [net_output['alpha']]
             depths = [net_output['depth']]
-            weights = [net_output['weights']]
+            weights_on_rays, xyz_on_rays, rgb_on_rays = [net_output['weights_on_rays']],[net_output['xyz_on_rays']],[net_output['rgb_on_rays']]
             cnl_xyzs, cnl_rgbs, cnl_weights = [net_output['cnl_xyz']],[net_output['cnl_rgb']], [net_output['cnl_weight']]
             img_names = [None] 
 
-        for hid,(rgb, alpha, depth, weight, cnl_xyz, cnl_rgb, cnl_weight, img_name) in \
-                enumerate(zip(rgbs, alphas, depths, weights, cnl_xyzs, cnl_rgbs, cnl_weights, img_names)):
+        for hid,(rgb, alpha, depth, cnl_xyz, cnl_rgb, cnl_weight, weights_on_ray, xyz_on_ray, rgb_on_ray, img_name) in \
+                enumerate(zip(rgbs, alphas, depths, cnl_xyzs, cnl_rgbs, cnl_weights, weights_on_rays, xyz_on_rays, rgb_on_rays, img_names)):
             width = batch['img_width']
             height = batch['img_height']
             ray_mask = batch['ray_mask']
@@ -254,9 +254,18 @@ def run_movement(render_folder_name='movement'):
             #back to 3d-canonical
             #weight.argmax() -> rgb/density/(x,y,z)
             if cfg.test.save_3d:
+                pos_on_image = (ray_mask.view((height, width))).nonzero() #N_rays, 2
+                rgb_on_image = batch['target_rgbs'] #N_rays, 3
+                writer.save_pkl({'weights_on_rays':weights_on_ray.data.cpu().numpy(), 
+                             'rgb_on_rays':rgb_on_ray.data.cpu().numpy(), 
+                             'xyz_on_rays':xyz_on_ray.data.cpu().numpy(),
+                             'rgb_on_image':rgb_on_image.data.cpu().numpy(),
+                             'pos_on_image':pos_on_image.data.cpu().numpy()}, name=batch['frame_name'].replace('/','-')+'-rays.pkl')
+                '''
                 weight_mask = (cnl_weight>cfg.test.weight_threshold)
                 cnl_xyz, cnl_rgb = cnl_xyz[weight_mask].data.cpu().numpy(), cnl_rgb[weight_mask].data.cpu().numpy()
                 writer.append_cnl_3d(cnl_xyz, cnl_rgb, obj_name=batch['frame_name'].replace('/','-')+'-cnl')
+                '''
 
 
     if multi_outputs:

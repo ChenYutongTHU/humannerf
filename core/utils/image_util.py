@@ -4,7 +4,7 @@ import shutil
 from termcolor import colored
 from PIL import Image
 import numpy as np
-import imageio
+import imageio, pickle
 
 
 def load_image(path, to_rgb=True):
@@ -100,6 +100,10 @@ class ImageWriter():
                 f.writelines(f'v {xyz[0]:.7f} {xyz[1]:.7f} {xyz[2]:.7f} ')
                 f.writelines(f'{rgb[0]:.7f} {rgb[1]:.7f} {rgb[2]:.7f} \n')
         return
+
+    def save_pkl(self, obj, name):
+        with open(os.path.join(self.obj_dir, name), 'wb') as f:
+            pickle.dump(obj, f)
 
     def finalize(self, video_name=None):
         #save_video
