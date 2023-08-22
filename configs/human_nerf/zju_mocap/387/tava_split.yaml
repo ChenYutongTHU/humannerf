@@ -8,6 +8,7 @@ experiment: 'tava_split'
 train:
   dataset_module: 'core.data.human_nerf.train'
   dataset: 'zju_387_tava_train'
+  selected_frame: all
 
 train_render:
   dataset_module: 'core.data.human_nerf.train'

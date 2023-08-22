@@ -91,10 +91,12 @@ class Trainer(object):
         if "l1" in loss_names:
             losses["l1"] = img2l1(rgb, target)
 
-        if "lpips" in loss_names:
+        if "lpips" in loss_names and cfg.train.lossweights.lpips>0:
             lpips_loss = self.lpips(scale_for_lpips(rgb.permute(0, 3, 1, 2)), #B,H,W,C 
                                     scale_for_lpips(target.permute(0, 3, 1, 2)))
             losses["lpips"] = torch.mean(lpips_loss)
+        else:
+            losses["lpips"] = 0 # accelerate computation
 
         return losses
 

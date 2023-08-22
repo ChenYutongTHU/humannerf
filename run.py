@@ -188,7 +188,6 @@ def run_movement(render_folder_name='movement'):
     for idx, batch in enumerate(tqdm(test_loader)):
         for k, v in batch.items():
             batch[k] = v[0]
-
         data = cpu_data_to_gpu(
                     batch,
                     exclude_keys=EXCLUDE_KEYS_TO_GPU + ['target_rgbs'])
@@ -253,6 +252,16 @@ def run_movement(render_folder_name='movement'):
             
             #back to 3d-canonical
             #weight.argmax() -> rgb/density/(x,y,z)
+            if cfg.test.save_3d_together:
+                #use ray_mask!
+                rgb_on_image = batch['target_rgbs'].to(weights_on_ray.device)
+                weighted_xyz = torch.sum(weights_on_ray[...,None]*xyz_on_ray, axis=1)
+                weight_max = torch.max(weights_on_ray, axis=-1)[0][...,None]
+                writer.append_3d_together(
+                    name=batch['frame_name'],
+                    data=torch.cat([weighted_xyz, rgb_on_image,weight_max], axis=1)) #N,(3+3+1)
+
+
             if cfg.test.save_3d:
                 pos_on_image = (ray_mask.view((height, width))).nonzero() #N_rays, 2
                 rgb_on_image = batch['target_rgbs'] #N_rays, 3
@@ -261,6 +270,7 @@ def run_movement(render_folder_name='movement'):
                              'xyz_on_rays':xyz_on_ray.data.cpu().numpy(),
                              'rgb_on_image':rgb_on_image.data.cpu().numpy(),
                              'pos_on_image':pos_on_image.data.cpu().numpy()}, name=batch['frame_name'].replace('/','-')+'-rays.pkl')
+
                 '''
                 weight_mask = (cnl_weight>cfg.test.weight_threshold)
                 cnl_xyz, cnl_rgb = cnl_xyz[weight_mask].data.cpu().numpy(), cnl_rgb[weight_mask].data.cpu().numpy()

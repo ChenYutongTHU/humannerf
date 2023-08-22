@@ -116,9 +116,15 @@ class Dataset(torch.utils.data.Dataset):
         if self.source_path is None:
             img_paths = list_files(os.path.join(self.dataset_path, 'images'),
                                 exts=['.png'])
-            return [split_path(ipath)[1] for ipath in img_paths]
+            frames = [split_path(ipath)[1] for ipath in img_paths]
         else:
-            return list(self.mesh_infos.keys()) #OrderedDict
+            frames = list(self.mesh_infos.keys()) #OrderedDict
+        if cfg.train.selected_frame != 'all':
+            assert os.path.isfile(cfg.train.selected_frame)
+            selected_frames = [l.strip() for l in open(cfg.train.selected_frame,'r').readlines()]
+            frames = [f for f in selected_frames if f in frames]
+            assert  len(frames)==len(selected_frames), (len(frames), len(selected_frames))
+        return frames
     
     def parse_view_from_frame(self, frame_name):
         if 'view' in frame_name:

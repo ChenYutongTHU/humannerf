@@ -1,5 +1,12 @@
+tools/*.sh 
+tools/*deprecate*
+*.ipynb
+*.obj
+*.png 
+LICENSE
+*.pklxs
 outputs/
-scripts/
+scripts/zju_mocap/*
 experiments/
 dataset/
 tools/prepare_zju_mocap/*yaml

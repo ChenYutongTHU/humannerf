@@ -7,7 +7,11 @@ then
 fi
 
 # render T-pose
-python run.py \
+for exp in loss/l1.0m0.0 #loss/l0.0m0.2 adventure nonrigid/wonr
+do
+CUDA_VISIBLE_DEVICES=3 python run.py \
     --type tpose \
     --cfg ./configs/human_nerf/zju_mocap/${SUBJECT}/adventure.yaml \
-    load_net latest
+    experiment ${exp} \
+    load_net latest eval.metrics []
+done

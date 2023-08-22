@@ -5,6 +5,7 @@ from termcolor import colored
 from PIL import Image
 import numpy as np
 import imageio, pickle
+import torch
 
 
 def load_image(path, to_rgb=True):
@@ -53,21 +54,23 @@ def tile_images(images, imgs_per_row=4):
      
 class ImageWriter():
     def __init__(self, output_dir, exp_name):
+        self.output_dir = output_dir
         self.image_dir = os.path.join(output_dir, exp_name)
         self.obj_dir = os.path.join(output_dir, exp_name+'_3d')
         print("The rendering is saved in " + \
               colored(self.image_dir, 'cyan'))
         
-        # remove image dir if it exists
-        if os.path.exists(self.image_dir):
-            shutil.rmtree(self.image_dir)
+        # # remove image dir if it exists
+        # if os.path.exists(self.image_dir):
+        #     shutil.rmtree(self.image_dir)
 
-        if os.path.exists(self.obj_dir):
-            shutil.rmtree(self.obj_dir)       
+        # if os.path.exists(self.obj_dir):
+        #     shutil.rmtree(self.obj_dir)       
         
         os.makedirs(self.image_dir, exist_ok=True)
         os.makedirs(self.obj_dir, exist_ok=True)
         self.frame_idx = -1
+        self.name_3d_together = {}
         self.images_np = []
 
     def append(self, image, img_name=None):
@@ -91,6 +94,9 @@ class ImageWriter():
         if not depth_img is None:
             np.save(os.path.join(self.obj_dir,f'{obj_name}-depth.npy'),depth_img)
         return
+    
+    def append_3d_together(self, name, data):
+        self.name_3d_together[name] = data
 
     def append_cnl_3d(self, cnl_xyz, cnl_rgb, obj_name=None):
         if obj_name is None:
@@ -106,6 +112,11 @@ class ImageWriter():
             pickle.dump(obj, f)
 
     def finalize(self, video_name=None):
+        if self.name_3d_together!={}:
+            filename = os.path.join(self.output_dir,'name-2-3d.bin')
+            torch.save(self.name_3d_together, filename)
+            print('Save as ', filename)
+
         #save_video
         image_stack = np.stack(self.images_np, axis=0)
         if video_name is None:
