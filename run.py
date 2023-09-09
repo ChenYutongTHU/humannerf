@@ -213,6 +213,8 @@ def run_movement(render_folder_name='movement'):
 
     model.eval()
     for idx, batch in enumerate(tqdm(test_loader)):
+        if args.test_num!=-1 and idx>=args.test_num:
+            break
         for k, v in batch.items():
             batch[k] = v[0]
         data = cpu_data_to_gpu(

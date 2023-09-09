@@ -70,6 +70,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--cfg", required=True, type=str)
 parser.add_argument("--type", default="skip", type=str)
 parser.add_argument("--pose_id", default="313", type=str)
+parser.add_argument("--test_num", default=-1, type=int)
 parser.add_argument("opts", default=None, nargs=argparse.REMAINDER)
 args = parser.parse_args()
 

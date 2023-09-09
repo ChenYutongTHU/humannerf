@@ -1,4 +1,4 @@
-import torch
+import torch, os
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -420,7 +420,10 @@ class Network(nn.Module):
             z_vals = self._stratified_sampling(z_vals)
 
         pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] #6144, 128, 3
-        dir_xyz = torch.nn.functional.normalize(rays_d)[:,None,:] # N,1,3
+        if os.environ.get('TEST_DIR', '') != '':
+            dir_xyz = torch.nn.functional.normalize(_['rays_d_'].float())[:,None,:] # N,1,3
+        else:
+            dir_xyz = torch.nn.functional.normalize(rays_d)[:,None,:] # N,1,3
         dir_xyz = torch.tile(dir_xyz, [1,pts.shape[1],1])
         if dir_idx is None:
             dir_idx = torch.zeros([dir_xyz.shape[0]*dir_xyz.shape[1], 1], dtype=torch.long, device=dir_xyz.device)

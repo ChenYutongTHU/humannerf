@@ -72,10 +72,16 @@ class Dataset(torch.utils.data.Dataset):
         self.ray_shoot_mode = ray_shoot_mode
 
         if os.path.isfile(cfg.multihead.split):
-            self.sample2head_id = json.load(open(cfg.multihead.split,'r'))
+            self.sample2head_id = json.load(open(cfg.mƒultihead.split,'r'))
         else:
             self.sample2head_id = None
 
+        if os.environ.get('TEST_DIR', '') != '':
+            print('Set test_dir to '+os.environ.get('TEST_DIR', '')) 
+            self.test_dir = int(os.environ.get('TEST_DIR', ''))
+            self.test_dir_camera = self.cameras[[name for name in self.framelist \
+                    if self.get_frame_camera(name)[1]==self.test_dir][0]]
+            print('Test direction uses camera:', self.test_dir_camera)
     def load_canonical_joints(self):
         cl_joint_path = os.path.join(self.dataset_path, 'canonical_joints.pkl')
         with open(cl_joint_path, 'rb') as f:
@@ -481,11 +487,29 @@ class Dataset(torch.utils.data.Dataset):
         rays_o = rays_o.reshape(-1, 3) # (H, W, 3) --> (N_rays, 3)
         rays_d = rays_d.reshape(-1, 3)
 
+
+
         # (selected N_samples, ), (selected N_samples, ), (N_samples, )
         near, far, ray_mask = rays_intersect_3d_bbox(dst_bbox, rays_o, rays_d)
         rays_o = rays_o[ray_mask]
         rays_d = rays_d[ray_mask]
         ray_img = ray_img[ray_mask]
+
+        if os.environ.get('TEST_DIR', '') != '':
+            K_ = self.test_dir_camera['intrinsics'][:3, :3].copy()
+            K_[:2] *= cfg.resize_img_scale
+
+            E_ = self.test_dir_camera['extrinsics']
+            E_ = apply_global_tfm_to_camera(
+                    E=E_, 
+                    Rh=dst_skel_info['Rh'],
+                    Th=dst_skel_info['Th'])
+            R_ = E_[:3, :3]
+            T_ = E_[:3, 3]
+            rays_o_, rays_d_ = get_rays_from_KRT(H, W, K_, R_, T_)
+            rays_d_ = rays_d_.reshape(-1, 3)
+            rays_d_ = rays_d_[ray_mask]
+            results.update({'rays_d_':rays_d_})
 
         near = near[:, None].astype('float32')
         far = far[:, None].astype('float32')
@@ -507,8 +531,7 @@ class Dataset(torch.utils.data.Dataset):
         else:
             assert False, f"Ivalid Ray Shoot Mode: {self.ray_shoot_mode}"
     
-        batch_rays = np.stack([rays_o, rays_d], axis=0) 
-
+        batch_rays = np.stack([rays_o, rays_d], axis=0) #
         if 'rays' in self.keyfilter:
             results.update({
                 'img_width': W,
