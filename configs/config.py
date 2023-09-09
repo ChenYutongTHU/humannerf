@@ -60,6 +60,8 @@ def make_cfg(args):
     parse_cfg(cfg)
 
     determine_primary_secondary_gpus(cfg)
+    cfg.test.type = args.type
+
         
     return cfg
 

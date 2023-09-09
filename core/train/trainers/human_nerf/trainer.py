@@ -47,9 +47,11 @@ class Trainer(object):
         network = network.cuda().deploy_mlps_to_secondary_gpus()
         self.network = network
 
+        self.wandb_run = wandb_run
+            
+
         self.optimizer = optimizer
         self.update_lr = create_lr_updater()
-        self.wandb_run = wandb_run
 
         if cfg.resume and Trainer.ckpt_exists(cfg.load_net):
             self.load_ckpt(f'{cfg.load_net}')
@@ -70,6 +72,13 @@ class Trainer(object):
         self.prog_dataloader = create_dataloader(data_type='progress')
 
         print('************************************')
+
+    def freeze_params(freeze_name):
+        print('********** Frozen parameters **********')
+        for name, param in self.network.named_parameters():
+            if freeze_name in name: 
+                param.requires_grad = False
+                
 
     @staticmethod
     def get_ckpt_path(name):
@@ -342,7 +351,10 @@ class Trainer(object):
         }, path)
 
     def load_ckpt(self, name):
-        path = Trainer.get_ckpt_path(name)
+        if os.path.isfile(name):
+            path = name
+        else:
+            path = Trainer.get_ckpt_path(name)
         print(f"Load checkpoint from {path} ...")
         
         ckpt = torch.load(path, map_location='cuda:0')

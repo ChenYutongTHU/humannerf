@@ -112,6 +112,18 @@ class Dataset(torch.utils.data.Dataset):
 
         return mesh_infos
 
+    def get_frame_camera(self, name):
+        name = name.split('.')[0] #to remove ext
+        if 'frame' in name:
+            frame, camera = name.split('_view_') #frame_000563, 12
+            frame_int = int(frame.split('frame_')[1])
+            camera_int = int(camera)
+        elif 'Camera' in name:
+            camera, frame = name.split('/')
+            camera_int = int(camera.split('Camera_B')[1])
+            frame_int = int(frame)
+        return frame_int, camera_int
+
     def load_train_frames(self):
         if self.source_path is None:
             img_paths = list_files(os.path.join(self.dataset_path, 'images'),
@@ -122,8 +134,22 @@ class Dataset(torch.utils.data.Dataset):
         if cfg.train.selected_frame != 'all':
             assert os.path.isfile(cfg.train.selected_frame)
             selected_frames = [l.strip() for l in open(cfg.train.selected_frame,'r').readlines()]
-            frames = [f for f in selected_frames if f in frames]
-            assert  len(frames)==len(selected_frames), (len(frames), len(selected_frames))
+            if cfg.test.type=='novelview_all': #eval novelview_all
+                selected_frames = sorted(list(set([self.get_frame_camera(s)[0] for s in selected_frames])))
+                views = set([self.get_frame_camera(f)[1] for f in frames])
+                #skip 16 quick dirty solution
+                '''
+                skip = 16
+                frames = []
+                for s in selected_frames[::skip]:
+                    frames.extend([f'Camera_B{v:1d}/{s:06d}.jpg' for v in views])
+                print(frames)
+                '''
+                frames = [f for f in frames if self.get_frame_camera(f)[0] in selected_frames]
+                print(f'number of different frames={len(selected_frames)} in the training set, we test {len(frames)} novel-view images')
+            else:
+                frames = [f for f in selected_frames if f in frames]
+                assert  len(frames)==len(selected_frames), (len(frames), len(selected_frames))
         return frames
     
     def parse_view_from_frame(self, frame_name):
@@ -366,7 +392,8 @@ class Dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         frame_name = self.framelist[idx]
         results = {
-            'frame_name': frame_name
+            'frame_name': frame_name,
+            'dir_idx': torch.tensor([self.views.index(self.parse_view_from_frame(frame_name))], dtype=torch.long)
         }
 
         if cfg.multihead.split == 'view':

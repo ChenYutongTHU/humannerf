@@ -8,7 +8,8 @@ from core.nets.human_nerf.component_factory import \
     load_canonical_mlp, \
     load_mweight_vol_decoder, \
     load_pose_decoder, \
-    load_non_rigid_motion_mlp
+    load_non_rigid_motion_mlp, \
+    load_vocab_embedder
 
 from configs import cfg
 
@@ -62,9 +63,18 @@ class Network(nn.Module):
         self.pos_embed_fn = cnl_pos_embed_fn
         
         if cfg.canonical_mlp.view_dir:
-            self.dir_embed_fn, cnl_dir_embed_size = \
-                get_embedder(cfg.canonical_mlp.multires_dir, 
-                            cfg.canonical_mlp.i_embed)
+            if cfg.canonical_mlp.view_embed == 'mlp':
+                get_embedder_dir = load_positional_embedder(cfg.embedder.module)
+                self.dir_embed_fn, cnl_dir_embed_size = \
+                    get_embedder_dir(cfg.canonical_mlp.multires_dir, 
+                                cfg.canonical_mlp.i_embed)
+            elif cfg.canonical_mlp.view_embed == 'vocab':
+                get_embedder_dir = load_vocab_embedder(cfg.vocab_embedder.module)
+                self.dir_embed_fn, cnl_dir_embed_size = \
+                    get_embedder_dir(cfg.canonical_mlp.view_vocab_n, 
+                                    cfg.canonical_mlp.view_vocab_dim)
+            else:
+                raise ValueError
         else:
             self.dir_embed_fn, cnl_dir_embed_size = None, -1
 
@@ -77,6 +87,8 @@ class Network(nn.Module):
                 mlp_width=cfg.canonical_mlp.mlp_width,
                 view_dir=cfg.canonical_mlp.view_dir, 
                 input_ch_dir=cnl_dir_embed_size, 
+                pose_color=cfg.canonical_mlp.pose_color,
+                pose_ch=cfg.canonical_mlp.pose_ch,
                 skips=skips,
                 multihead_enable=cfg.canonical_mlp.multihead.enable,
                 multihead_depth=cfg.canonical_mlp.multihead.head_depth,
@@ -111,13 +123,16 @@ class Network(nn.Module):
             pos_embed_fn, 
             non_rigid_pos_embed_fn,
             non_rigid_mlp_input,
-            dir_xyz,
+            dir_xyz, dir_idx, 
             dir_embed_fn, 
-            head_id):
+            head_id, pose_latent):
 
         # (N_rays, N_samples, 3) --> (N_rays x N_samples, 3)
         pos_flat = torch.reshape(pos_xyz, [-1, pos_xyz.shape[-1]])
-        dir_flat = torch.reshape(dir_xyz, [-1, dir_xyz.shape[-1]])
+        if cfg.canonical_mlp.view_embed == 'mlp':
+            dir_flat = torch.reshape(dir_xyz, [-1, dir_xyz.shape[-1]])
+        elif cfg.canonical_mlp.view_embed == 'vocab':
+            dir_flat = torch.reshape(dir_idx, [-1,]) #N,
         chunk = cfg.netchunk_per_gpu*len(cfg.secondary_gpus)
 
         result = self._apply_mlp_kernals(
@@ -127,7 +142,7 @@ class Network(nn.Module):
                         non_rigid_pos_embed_fn=non_rigid_pos_embed_fn,
                         dir_flat=dir_flat, 
                         dir_embed_fn=dir_embed_fn,
-                        chunk=chunk, head_id=head_id)
+                        chunk=chunk, head_id=head_id, pose_latent=pose_latent)
 
         output = {}
 
@@ -166,7 +181,7 @@ class Network(nn.Module):
             non_rigid_pos_embed_fn,
             dir_flat, 
             dir_embed_fn,
-            chunk, head_id):
+            chunk, head_id, pose_latent):
 
         if cfg.canonical_mlp.multihead.enable and head_id==-1:
             raws_list = [[] for i in range(cfg.multihead.head_num)]
@@ -196,7 +211,7 @@ class Network(nn.Module):
                 xyz = result['xyz'] #B, 3 or list
             
             if cfg.canonical_mlp.view_dir:
-                dir_embed = dir_embed_fn(dir_)
+                dir_embed = dir_embed_fn(dir_) #vocab: anyshape
             else:
                 dir_embed = None
 
@@ -208,7 +223,7 @@ class Network(nn.Module):
                         new_head_id_expanded = torch.ones_like(head_id_expanded)*head_id_
                         xyz_list[head_id_].append(xyz_)
                         raws_list[head_id_] += [self.cnl_mlp(
-                                    pos_embed=xyz_embedded, dir_embed=dir_embed, 
+                                    pos_embed=xyz_embedded, dir_embed=dir_embed,  
                                     head_id=new_head_id_expanded)] #N*num_head, 4                     
                 else:
                     xyz_embedded = pos_embed_fn(xyz) #B*n_head (if argmin), 3*2*10 
@@ -223,6 +238,7 @@ class Network(nn.Module):
                 xyzs.append(xyz)
                 raws += [self.cnl_mlp(
                             pos_embed=xyz_embedded, dir_embed=dir_embed, 
+                            pose_latent=self._expand_input(pose_latent, total_elem),
                             head_id=head_id_expanded)] #N*num_head, 4
         
         if cfg.canonical_mlp.multihead.enable  and head_id.min()==-1:
@@ -348,7 +364,8 @@ class Network(nn.Module):
             results['x_skel'] = x_skel
         if 'fg_likelihood_mask' in output_list: # [N_rays x N_samples, 1]
             results['fg_likelihood_mask'] = fg_likelihood_mask
-        
+        if 'backward_motion_weights' in output_list:
+            results['backward_motion_weights'] = backwarp_motion_weights
         return results
 
 
@@ -392,6 +409,7 @@ class Network(nn.Module):
             dir_embed_fn,
             non_rigid_mlp_input=None,
             bgcolor=None, head_id=None,
+            pose_latent=None, dir_idx=None, 
             **_):
         
         N_rays = ray_batch.shape[0]
@@ -404,6 +422,10 @@ class Network(nn.Module):
         pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] #6144, 128, 3
         dir_xyz = torch.nn.functional.normalize(rays_d)[:,None,:] # N,1,3
         dir_xyz = torch.tile(dir_xyz, [1,pts.shape[1],1])
+        if dir_idx is None:
+            dir_idx = torch.zeros([dir_xyz.shape[0]*dir_xyz.shape[1], 1], dtype=torch.long, device=dir_xyz.device)
+        else:
+            dir_idx = torch.tile(dir_idx[:, None], [dir_xyz.shape[0],pts.shape[1]]) #(1,1)->(N-ray, N-point)
         mv_output = self._sample_motion_fields(
                             pts=pts,
                             motion_scale_Rs=motion_scale_Rs[0], 
@@ -411,9 +433,10 @@ class Network(nn.Module):
                             motion_weights_vol=motion_weights_vol,
                             cnl_bbox_min_xyz=cnl_bbox_min_xyz, 
                             cnl_bbox_scale_xyz=cnl_bbox_scale_xyz,
-                            output_list=['x_skel', 'fg_likelihood_mask'])
+                            output_list=['x_skel', 'fg_likelihood_mask', 'backward_motion_weights'])
         pts_mask = mv_output['fg_likelihood_mask']
         cnl_pts = mv_output['x_skel']
+        backward_motion_weights = mv_output['backward_motion_weights']
 
         query_result = self._query_mlp(
                                 pos_xyz=cnl_pts, 
@@ -421,8 +444,8 @@ class Network(nn.Module):
                                 pos_embed_fn=pos_embed_fn,
                                 non_rigid_pos_embed_fn=non_rigid_pos_embed_fn,
                                 dir_embed_fn=dir_embed_fn,
-                                dir_xyz=dir_xyz,
-                                head_id=head_id)
+                                dir_xyz=dir_xyz, dir_idx=dir_idx, 
+                                head_id=head_id, pose_latent=pose_latent)
         raw = query_result['raws']
         xyz = query_result['xyzs']
         
@@ -455,7 +478,8 @@ class Network(nn.Module):
                 'depth': depth_map,
                 'weights_on_rays': weights,
                 'xyz_on_rays': xyz, 'rgb_on_rays': rgb_on_rays, 
-                'cnl_xyz':cnl_xyz, 'cnl_rgb':cnl_rgb, 'cnl_weight':cnl_weight}#, multi_outputs
+                'cnl_xyz':cnl_xyz, 'cnl_rgb':cnl_rgb, 'cnl_weight':cnl_weight,
+                'backward_motion_weights': backward_motion_weights}#, multi_outputs
 
 
     def _get_motion_base(self, dst_Rs, dst_Ts, cnl_gtfms):
@@ -513,12 +537,12 @@ class Network(nn.Module):
             non_rigid_mlp_input = torch.zeros_like(dst_posevec) * dst_posevec
         else:
             non_rigid_mlp_input = dst_posevec
-
         kwargs.update({
             "pos_embed_fn": self.pos_embed_fn,
             "dir_embed_fn": self.dir_embed_fn,
             "non_rigid_pos_embed_fn": non_rigid_pos_embed_fn,
-            "non_rigid_mlp_input": non_rigid_mlp_input
+            "non_rigid_mlp_input": non_rigid_mlp_input,
+            "pose_latent": dst_posevec, 
         })
 
         motion_scale_Rs, motion_Ts = self._get_motion_base(

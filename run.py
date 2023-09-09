@@ -62,9 +62,17 @@ def _freeview(
 
     model = load_network()
     test_loader = create_dataloader(data_type, **kwargs)
-    writer = ImageWriter(
-        output_dir=os.path.join(cfg.logdir, cfg.load_net+cfg.eval_output_tag),
-        exp_name=render_folder_name)
+    multi_outputs = (cfg.multihead.head_num>1 and cfg.test.head_id==-1)
+    if multi_outputs:
+        writer = []
+        for i in range(cfg.multihead.head_num):
+            writer.append(ImageWriter(
+                output_dir=os.path.join(cfg.logdir, cfg.load_net+cfg.eval_output_tag+f'_h{i}'),
+                exp_name=render_folder_name))    
+    else:
+        writer = ImageWriter(
+            output_dir=os.path.join(cfg.logdir, cfg.load_net+cfg.eval_output_tag),
+            exp_name=render_folder_name)
     # metrics_writer = MetricsWriter(
     #     output_dir=os.path.join(cfg.logdir, cfg.load_net+cfg.eval_output_tag), 
     #     exp_name=render_folder_name,
@@ -72,7 +80,8 @@ def _freeview(
 
     model.eval()
     step = 0
-    for batch in enumerate(test_loader):
+
+    for batch in tqdm(test_loader):
         step += 1
         for k, v in batch.items():
             batch[k] = v[0]
@@ -94,19 +103,24 @@ def _freeview(
             rgbs = net_output['rgb']
             alphas = net_output['alpha']
             depths = net_output['depth']
+            weights_on_rays, xyz_on_rays, rgb_on_rays = net_output['weights_on_rays'],net_output['xyz_on_rays'],net_output['rgb_on_rays']
             img_names = [f'{step:06d}_head{i}' for i,_ in enumerate(rgbs)]             
         else:
             rgbs = [net_output['rgb']]
             alphas = [net_output['alpha']]
             depths = [net_output['depth']]
-            img_names = [None]            
-        for rgb, alpha, depth, img_name in zip(rgbs, alphas, depths, img_names):
+            weights_on_rays, xyz_on_rays, rgb_on_rays = [net_output['weights_on_rays']],[net_output['xyz_on_rays']],[net_output['rgb_on_rays']]
+            img_names = [None]      
+ 
+        for hid, (rgb, alpha, depth, img_name, weights_on_ray, xyz_on_ray, rgb_on_ray)  in enumerate(zip(rgbs, alphas, depths, img_names, weights_on_rays, xyz_on_rays, rgb_on_rays)):
             target_rgbs = batch.get('target_rgbs', None)
             raw_rgbs = batch.get('raw_rgbs', None)
             rgb_img, alpha_img, _ = unpack_to_image(
                 width, height, ray_mask, np.array(cfg.bgcolor) / 255.,
-                rgb.data.cpu().numpy(),)
-            depth_img = unpack_alpha_map(alpha_vals=depth, ray_mask=ray_mask, width=width, height=height)
+                rgb.data.cpu().numpy(),                    
+                alpha.data.cpu().numpy())
+
+            #depth_img = unpack_alpha_map(alpha_vals=depth, ray_mask=ray_mask, width=width, height=height)
             imgs = [rgb_img]
             if cfg.show_truth and target_rgbs is not None:
                 raw_rgbs = to_8b_image(raw_rgbs.numpy())
@@ -114,10 +128,23 @@ def _freeview(
             if cfg.show_alpha:
                 imgs.append(alpha_img)
             img_out = np.concatenate(imgs, axis=1)
-            writer.append(img_out, img_name=img_name)
-        #metrics_writer.append(name=img_name, pred=rgb_img, target=raw_rgbs)
+            if multi_outputs:
+                writer[hid].append(img_out, img_name=img_name)
+            else:
+                writer.append(img_out, img_name=img_name)
 
-    writer.finalize()
+            if cfg.test.save_3d:
+                weight_mask = (weights_on_ray.max(axis=1)[0]>cfg.test.weight_threshold) #R,N -> R,
+                xyzs = torch.sum(xyz_on_ray[weight_mask]*weights_on_ray[weight_mask][...,None],axis=1) #R,N,3*R,N,1 ->R,N
+                rgbs = torch.sum(rgb_on_ray[weight_mask]*weights_on_ray[weight_mask][...,None],axis=1) #R,N,3*R,N,1 ->R,N
+                #cnl_xyz, cnl_rgb = xyz_on_ray[weight_mask].data.cpu().numpy(), rgb_on_ray[weight_mask].data.cpu().numpy()
+                writer.append_cnl_3d(xyzs.data.cpu().numpy(), rgbs.data.cpu().numpy(), obj_name=str(step)+'-cnl')
+        #metrics_writer.append(name=img_name, pred=rgb_img, target=raw_rgbs)
+    if multi_outputs:
+        for w in writer:
+            w.finalize()
+    else:
+        writer.finalize()
 
 
 def run_freeview():
@@ -201,16 +228,19 @@ def run_movement(render_folder_name='movement'):
             alphas = net_output['alpha']
             depths = net_output['depth']
             weights_on_rays, xyz_on_rays, rgb_on_rays = net_output['weights_on_rays'],net_output['xyz_on_rays'],net_output['rgb_on_rays']
+            backward_motion_weights = net_output['backward_motion_weights']
             cnl_xyzs, cnl_rgbs, cnl_weights = net_output['cnl_xyz'],net_output['cnl_rgb'],net_output['cnl_weight']
             img_names = [f'{idx:06d}_head{i}' for i,_ in enumerate(rgbs)]          
         else:
             rgbs = [net_output['rgb']]
             alphas = [net_output['alpha']]
             depths = [net_output['depth']]
+            backward_motion_weights = net_output['backward_motion_weights']
             weights_on_rays, xyz_on_rays, rgb_on_rays = [net_output['weights_on_rays']],[net_output['xyz_on_rays']],[net_output['rgb_on_rays']]
             cnl_xyzs, cnl_rgbs, cnl_weights = [net_output['cnl_xyz']],[net_output['cnl_rgb']], [net_output['cnl_weight']]
             img_names = [None] 
 
+        # import ipdb; ipdb.set_trace()
         for hid,(rgb, alpha, depth, cnl_xyz, cnl_rgb, cnl_weight, weights_on_ray, xyz_on_ray, rgb_on_ray, img_name) in \
                 enumerate(zip(rgbs, alphas, depths, cnl_xyzs, cnl_rgbs, cnl_weights, weights_on_rays, xyz_on_rays, rgb_on_rays, img_names)):
             width = batch['img_width']
@@ -257,12 +287,28 @@ def run_movement(render_folder_name='movement'):
                 rgb_on_image = batch['target_rgbs'].to(weights_on_ray.device)
                 weighted_xyz = torch.sum(weights_on_ray[...,None]*xyz_on_ray, axis=1)
                 weight_max = torch.max(weights_on_ray, axis=-1)[0][...,None]
+                lbs = torch.sum(weights_on_ray[...,None]*backward_motion_weights, axis=1)
+                lbs_argmax = torch.argmax(lbs, axis=1)[...,None] #N
+                pos_on_image = (ray_mask.view((height, width))).nonzero().to(weights_on_ray.device)
+                save_mask = (torch.max(weights_on_ray,axis=1)[0])>cfg.test.weight_threshold
+                save_mask = save_mask.to(weights_on_ray.device)
                 writer.append_3d_together(
                     name=batch['frame_name'],
-                    data=torch.cat([weighted_xyz, rgb_on_image,weight_max], axis=1)) #N,(3+3+1)
+                    data=torch.cat([weighted_xyz[save_mask], 
+                                    rgb_on_image[save_mask], 
+                                    weight_max[save_mask], 
+                                    pos_on_image[save_mask], 
+                                    lbs_argmax[save_mask]], axis=1)) #N,(3+3+1)
 
 
             if cfg.test.save_3d:
+                weight_mask = (weights_on_ray.max(axis=1)[0]>cfg.test.weight_threshold) #R,N -> R,
+                xyzs = torch.sum(xyz_on_ray[weight_mask]*weights_on_ray[weight_mask][...,None],axis=1) #R,N,3*R,N,1 ->R,N
+                rgbs = torch.sum(rgb_on_ray[weight_mask]*weights_on_ray[weight_mask][...,None],axis=1) #R,N,3*R,N,1 ->R,N
+                #cnl_xyz, cnl_rgb = xyz_on_ray[weight_mask].data.cpu().numpy(), rgb_on_ray[weight_mask].data.cpu().numpy()
+                writer.append_cnl_3d(xyzs.data.cpu().numpy(), rgbs.data.cpu().numpy(), 
+                    obj_name=batch['frame_name'].replace('/','-')+f'-cnl-t{cfg.test.weight_threshold}')
+                '''
                 pos_on_image = (ray_mask.view((height, width))).nonzero() #N_rays, 2
                 rgb_on_image = batch['target_rgbs'] #N_rays, 3
                 writer.save_pkl({'weights_on_rays':weights_on_ray.data.cpu().numpy(), 
@@ -270,6 +316,7 @@ def run_movement(render_folder_name='movement'):
                              'xyz_on_rays':xyz_on_ray.data.cpu().numpy(),
                              'rgb_on_image':rgb_on_image.data.cpu().numpy(),
                              'pos_on_image':pos_on_image.data.cpu().numpy()}, name=batch['frame_name'].replace('/','-')+'-rays.pkl')
+                '''
 
                 '''
                 weight_mask = (cnl_weight>cfg.test.weight_threshold)

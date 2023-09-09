@@ -6,7 +6,10 @@ from core.nets.human_nerf.multihead import MultiheadMlp
 
 class CanonicalMLP(nn.Module):
     def __init__(self, mlp_depth=8, mlp_width=256, 
-                 input_ch=3, skips=None, view_dir=False, input_ch_dir=3,
+                 input_ch=3, skips=None, 
+                 view_dir=False, input_ch_dir=3, 
+                 pose_ch=69,
+                 pose_color='wo',
                  multihead_enable=False, multihead_depth=1, multihead_num=4,
                  mlp_depth_plus=0,
                  last_linear_scale=1, **kwargs):
@@ -19,6 +22,8 @@ class CanonicalMLP(nn.Module):
         self.mlp_width = mlp_width
         self.input_ch = input_ch
         self.view_dir = view_dir
+        self.pose_color = pose_color #'dependent','ao' or 'wo'
+        self.pose_ch = pose_ch
         self.input_ch_dir = input_ch_dir
         self.multihead_enable, self.multihead_num = multihead_enable, multihead_num
         self.multihead_depth = multihead_depth
@@ -43,12 +48,17 @@ class CanonicalMLP(nn.Module):
         initseq(self.pts_linears)
 
         # output: rgb + sigma (density)
-        if self.view_dir:
+        if self.view_dir or self.pose_color == 'direct':
             assert self.multihead_enable==False, 'Unsupported multihead+view-dependent rgb'
             self.output_linear_density = nn.Sequential(nn.Linear(mlp_width, 1))
             self.output_linear_rgb_1 = nn.Sequential(nn.Linear(mlp_width, mlp_width))
+            dim = mlp_width
+            if self.view_dir:
+                dim += self.input_ch_dir
+            if self.pose_color=='direct':
+                dim += self.pose_ch
             self.output_linear_rgb_2 = nn.Sequential(
-                nn.Linear(mlp_width+self.input_ch_dir, mlp_width),
+                nn.Linear(dim, mlp_width),
                 nn.Linear(mlp_width, 3))
         else:
             if self.multihead_enable==False:
@@ -71,20 +81,30 @@ class CanonicalMLP(nn.Module):
             else:
                 pass #multihead_mlp already initialized in MultiheadMlp
 
+        if self.pose_color == 'ao':
+            self.output_linear_ao_1 = nn.Sequential(nn.Linear(mlp_width, mlp_width))
+            dim = mlp_width+self.pose_ch
+            self.output_linear_ao_2 = nn.Sequential(
+                nn.Linear(dim, mlp_width),
+                nn.Linear(mlp_width, 1)) #output a scalar
+            self.ao_activation = torch.nn.Sigmoid()
 
-    def forward(self, pos_embed, dir_embed=None, head_id=None, **_):
+    def forward(self, pos_embed, dir_embed=None, head_id=None, pose_latent=None, **_):
         h = pos_embed # B(*n_head), dim
         for i, _ in enumerate(self.pts_linears):
             if i in self.layers_to_cat_input:
                 h = torch.cat([pos_embed, h], dim=-1)
             h = self.pts_linears[i](h)
 
-        if self.view_dir:
+        if self.view_dir or self.pose_color=='direct':
             assert not self.multihead_enable
             density = self.output_linear_density(h)
-            feature = self.output_linear_rgb_1(h) #N,D
-            feature_dir = torch.cat([feature, dir_embed],dim=1)
-            rgb = self.output_linear_rgb_2(feature_dir)
+            features = [self.output_linear_rgb_1(h)] #N,D
+            if self.view_dir:
+                features.append(dir_embed)
+            if self.pose_color=='direct':
+                features.append(pose_latent)
+            rgb = self.output_linear_rgb_2(torch.cat(features,dim=1))
             outputs = torch.cat([rgb, density],dim=1) #N, 4
         else:
             if self.multihead_enable:
@@ -94,7 +114,7 @@ class CanonicalMLP(nn.Module):
                         outputs = self.output_linear(h)
                         outputs = [outputs[...,4*hid:4*(hid+1)] for hid in range(self.multihead_num)] #outputs[...,4*head_id:4*(head_id+1)]
                     else:
-                        outputs = [self.multihead_mlp(h, hid) for hid in range(self.multihead_num)]                  
+                        outputs = [self.multihead_mlp(h, hid) for hid in range(self.multihead_num)]              
                 else:
                     if self.multihead_depth==1:
                         outputs = self.output_linear(h)
@@ -103,5 +123,11 @@ class CanonicalMLP(nn.Module):
                         outputs = self.multihead_mlp(h, head_id)
             else:
                 outputs = self.output_linear(h)
+        
+        if self.pose_color == 'ao':
+            feature = self.output_linear_ao_1(h)
+            ao = self.output_linear_ao_2(torch.cat([feature, pose_latent], axis=1))
+            ao = self.ao_activation(ao)
+            outputs = torch.cat([rgb*ao, density],dim=1) #N, 4
         return outputs    
         

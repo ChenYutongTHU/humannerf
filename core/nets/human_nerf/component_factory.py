@@ -5,6 +5,11 @@ def load_positional_embedder(module_name):
     module_path = module.replace(".", "/") + ".py"
     return imp.load_source(module, module_path).get_embedder
 
+def load_vocab_embedder(module_name):
+    module = module_name
+    module_path = module.replace(".", "/") + ".py"
+    return imp.load_source(module, module_path).get_embedder    
+
 def load_canonical_mlp(module_name):
     module = module_name
     module_path = module.replace(".", "/") + ".py"

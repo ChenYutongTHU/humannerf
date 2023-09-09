@@ -4,7 +4,7 @@ tools/*deprecate*
 *.obj
 *.png 
 LICENSE
-*.pklxs
+*.pkl
 outputs/
 scripts/zju_mocap/*
 experiments/

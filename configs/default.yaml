@@ -14,6 +14,10 @@ optimizer_module: 'core.train.optimizers.human_nerf.optimizer'
 embedder:
   module: "core.nets.human_nerf.embedders.fourier"
 
+# learnable embeddings for view directions or T
+vocab_embedder:
+  module: "core.nets.human_nerf.embedders.vocab_embedder"
+
 # positional embedder -- non-rigid motion mlp
 non_rigid_embedder:
   module: "core.nets.human_nerf.embedders.hannw_fourier"
@@ -27,6 +31,11 @@ canonical_mlp:
   multires: 10         # log2 of max freq for positional encoding (3D location)
   i_embed: 0           # set 0 for default positional encoding, -1 for none
   view_dir: False
+  view_embed: mlp #vocab or mlp
+  view_vocab_n: 4
+  view_vocab_dim: 27
+  pose_color: wo
+  pose_ch: 69
   multires_dir: 4
   last_linear_scale: 1
   multihead:
@@ -103,6 +112,7 @@ train:
 test:
   head_id: -1
   weight_threshold: 0.3
+  type: skip
   save_3d: False
   save_3d_together: False
 
@@ -195,6 +205,17 @@ multihead:
     unselected_lossweights: # for those unselected head
       lpips: 0.0
       mse: 0.0
+
+modules:
+  pretrained_path: empty
+  canonical_mlp:
+    reinit: False
+    tune: False
+  non_rigid_motion_mlp: 
+    reinit: False
+    tune: False
+
+  
 
 
 
