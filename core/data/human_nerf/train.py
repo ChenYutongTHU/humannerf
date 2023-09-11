@@ -3,8 +3,9 @@ import pickle
 
 import numpy as np
 import cv2
-import torch, json
+import torch, json, torchvision
 import torch.utils.data
+from PIL import Image
 
 from core.utils.image_util import load_image, to_3ch_image
 from core.utils.body_util import \
@@ -320,17 +321,47 @@ class Dataset(torch.utils.data.Dataset):
             alpha_mask = cv2.undistort(alpha_mask, K, D)
 
         alpha_mask = alpha_mask / 255.
+
+        if cfg.experiments.color_perturbation != 'empty':
+            if cfg.experiments.color_perturbation=='per_view':
+                _, camera = self.get_frame_camera(frame_name)
+                if cfg.experiments.color_perturbation_strength=='strong':
+                    if camera==0:
+                        #orig_img = np.clip(orig_img*0.8+0.2,0,1)
+                        orig_img[:,:,0] =  np.clip(orig_img[:,:,0]*0.8-0.2,0,1)
+                    elif camera==6:
+                        orig_img[:,:,1] =  np.clip(orig_img[:,:,1]*1.2+0.2,0,1)
+                    elif camera==12:
+                        orig_img =  orig_img*0.5
+                    elif camera==18:
+                        pass
+                    else:
+                        pass
+                elif cfg.experiments.color_perturbation_strength=='weak':
+                    if camera==0:
+                        #orig_img = np.clip(orig_img*0.8+0.2,0,1)
+                        orig_img =  np.clip(orig_img*0.6,0,255).astype(np.uint8)
+                    elif camera==6:
+                        orig_img =  np.clip(orig_img*0.8,0,255).astype(np.uint8)
+                    elif camera==12:
+                        orig_img =  np.clip(orig_img*1.2,0,255).astype(np.uint8)
+                    elif camera==18:
+                        pass
+                    else:
+                        pass                    
+            else:
+                raise ValueError
+
         img = alpha_mask * orig_img + (1.0 - alpha_mask) * bg_color[None, None, :]
         if cfg.resize_img_scale != 1.:
             img = cv2.resize(img, None, 
                                 fx=cfg.resize_img_scale,
                                 fy=cfg.resize_img_scale,
-                                interpolation=cv2.INTER_LANCZOS4)
+                                interpolation=cv2.INTER_LANCZOS4) #H,W,3
             alpha_mask = cv2.resize(alpha_mask, None, 
                                     fx=cfg.resize_img_scale,
                                     fy=cfg.resize_img_scale,
-                                    interpolation=cv2.INTER_LINEAR)
-                                
+                                    interpolation=cv2.INTER_LINEAR)                        
         return img, alpha_mask
 
 
@@ -462,6 +493,7 @@ class Dataset(torch.utils.data.Dataset):
 
         img, alpha = self.load_image(frame_name, bgcolor)
         img = (img / 255.).astype('float32')
+
         results['raw_rgbs'] = img
         H, W = img.shape[0:2]
 

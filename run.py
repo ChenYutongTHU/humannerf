@@ -229,6 +229,7 @@ def run_movement(render_folder_name='movement'):
             rgbs = net_output['rgb']
             alphas = net_output['alpha']
             depths = net_output['depth']
+            offsets = net_output['offsets']
             weights_on_rays, xyz_on_rays, rgb_on_rays = net_output['weights_on_rays'],net_output['xyz_on_rays'],net_output['rgb_on_rays']
             backward_motion_weights = net_output['backward_motion_weights']
             cnl_xyzs, cnl_rgbs, cnl_weights = net_output['cnl_xyz'],net_output['cnl_rgb'],net_output['cnl_weight']
@@ -237,14 +238,15 @@ def run_movement(render_folder_name='movement'):
             rgbs = [net_output['rgb']]
             alphas = [net_output['alpha']]
             depths = [net_output['depth']]
+            offsets = [net_output['offsets']]
             backward_motion_weights = net_output['backward_motion_weights']
             weights_on_rays, xyz_on_rays, rgb_on_rays = [net_output['weights_on_rays']],[net_output['xyz_on_rays']],[net_output['rgb_on_rays']]
             cnl_xyzs, cnl_rgbs, cnl_weights = [net_output['cnl_xyz']],[net_output['cnl_rgb']], [net_output['cnl_weight']]
             img_names = [None] 
 
         # import ipdb; ipdb.set_trace()
-        for hid,(rgb, alpha, depth, cnl_xyz, cnl_rgb, cnl_weight, weights_on_ray, xyz_on_ray, rgb_on_ray, img_name) in \
-                enumerate(zip(rgbs, alphas, depths, cnl_xyzs, cnl_rgbs, cnl_weights, weights_on_rays, xyz_on_rays, rgb_on_rays, img_names)):
+        for hid,(rgb, alpha, depth, cnl_xyz, cnl_rgb, cnl_weight, weights_on_ray, xyz_on_ray, rgb_on_ray, offset_on_ray, img_name) in \
+                enumerate(zip(rgbs, alphas, depths, cnl_xyzs, cnl_rgbs, cnl_weights, weights_on_rays, xyz_on_rays, rgb_on_rays, offsets, img_names)):
             width = batch['img_width']
             height = batch['img_height']
             ray_mask = batch['ray_mask']
@@ -304,6 +306,7 @@ def run_movement(render_folder_name='movement'):
 
 
             if cfg.test.save_3d:
+                '''
                 weight_mask = (weights_on_ray.max(axis=1)[0]>cfg.test.weight_threshold) #R,N -> R,
                 xyzs = torch.sum(xyz_on_ray[weight_mask]*weights_on_ray[weight_mask][...,None],axis=1) #R,N,3*R,N,1 ->R,N
                 rgbs = torch.sum(rgb_on_ray[weight_mask]*weights_on_ray[weight_mask][...,None],axis=1) #R,N,3*R,N,1 ->R,N
@@ -317,8 +320,10 @@ def run_movement(render_folder_name='movement'):
                              'rgb_on_rays':rgb_on_ray.data.cpu().numpy(), 
                              'xyz_on_rays':xyz_on_ray.data.cpu().numpy(),
                              'rgb_on_image':rgb_on_image.data.cpu().numpy(),
-                             'pos_on_image':pos_on_image.data.cpu().numpy()}, name=batch['frame_name'].replace('/','-')+'-rays.pkl')
-                '''
+                             'pos_on_image':pos_on_image.data.cpu().numpy(),
+                             'offset_on_rays':offset_on_ray.data.cpu().numpy(),
+                             'cnl_xyz':cnl_xyz.data.cpu().numpy()}, name=batch['frame_name'].replace('/','-')+'-rays.pkl')
+
 
                 '''
                 weight_mask = (cnl_weight>cfg.test.weight_threshold)

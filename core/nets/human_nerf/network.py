@@ -148,20 +148,25 @@ class Network(nn.Module):
 
         raws_flat = result['raws']
         xyzs_flat = result['xyzs'] #batch, 3 or [(batch,3), (batch,3)]
+        offsets_flat = result['offsets']
         if type(raws_flat)==list:
             assert head_id.min()==-1, head_id
             assert type(xyzs_flat)==list, len(xyzs_flat)==len(raws_flat)
             output['raws'] = [torch.reshape(
                                 raws_flat_, 
                                 list(pos_xyz.shape[:-1]) + [raws_flat_.shape[-1]]) for raws_flat_ in raws_flat]     
-            output['xyzs'] = [torch.reshape(xyzs_flat_, list(pos_xyz.shape[:-1]) + [xyzs_flat_.shape[-1]]) for xyzs_flat_ in xyzs_flat]       
+            output['xyzs'] = [torch.reshape(xyzs_flat_, list(pos_xyz.shape[:-1]) + [xyzs_flat_.shape[-1]]) for xyzs_flat_ in xyzs_flat]   
+            output['offsets'] = [torch.reshape(offsets_flat_, list(pos_xyz.shape[:-1]) + [offsets_flat_.shape[-1]]) for offsets_flat_ in offsets_flat]     
         else:
             output['raws'] = torch.reshape(
                                 raws_flat, 
                                 list(pos_xyz.shape[:-1]) + [raws_flat.shape[-1]]) 
             output['xyzs'] = torch.reshape(
                                 xyzs_flat, 
-                                list(pos_xyz.shape[:-1]) + [xyzs_flat.shape[-1]])                                
+                                list(pos_xyz.shape[:-1]) + [xyzs_flat.shape[-1]])                     
+            output['offsets'] = torch.reshape(
+                                offsets_flat, 
+                                list(pos_xyz.shape[:-1]) + [offsets_flat.shape[-1]])          
 
         return output
 
@@ -189,6 +194,7 @@ class Network(nn.Module):
         else:
             raws = []
             xyzs = []
+            offsets = []
         output = {}
         # iterate ray samples by trunks
         for i in range(0, pos_flat.shape[0], chunk):
@@ -209,7 +215,9 @@ class Network(nn.Module):
                     head_id=head_id_expanded
                 )
                 xyz = result['xyz'] #B, 3 or list
-            
+                ofs = result['offsets']
+            else:
+                ofs = torch.zeros_like(xyz)
             if cfg.canonical_mlp.view_dir:
                 dir_embed = dir_embed_fn(dir_) #vocab: anyshape
             else:
@@ -236,6 +244,7 @@ class Network(nn.Module):
             else:
                 xyz_embedded = pos_embed_fn(xyz) #B*n_head (if argmin), 3*2*10
                 xyzs.append(xyz)
+                offsets.append(ofs) #N,
                 raws += [self.cnl_mlp(
                             pos_embed=xyz_embedded, dir_embed=dir_embed, 
                             pose_latent=self._expand_input(pose_latent, total_elem),
@@ -249,6 +258,7 @@ class Network(nn.Module):
         else:
             output['raws'] = torch.cat(raws, dim=0).to(cfg.primary_gpus[0]) #N*num_head, 4
             output['xyzs'] = torch.cat(xyzs, dim=0).to(cfg.primary_gpus[0])
+            output['offsets'] = torch.cat(offsets, dim=0).to(cfg.primary_gpus[0])
 
         return output
 
@@ -482,7 +492,8 @@ class Network(nn.Module):
                 'weights_on_rays': weights,
                 'xyz_on_rays': xyz, 'rgb_on_rays': rgb_on_rays, 
                 'cnl_xyz':cnl_xyz, 'cnl_rgb':cnl_rgb, 'cnl_weight':cnl_weight,
-                'backward_motion_weights': backward_motion_weights}#, multi_outputs
+                'backward_motion_weights': backward_motion_weights,
+                'offsets': query_result['offsets']}#, multi_outputs
 
 
     def _get_motion_base(self, dst_Rs, dst_Ts, cnl_gtfms):
