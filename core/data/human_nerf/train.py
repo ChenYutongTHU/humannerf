@@ -185,13 +185,14 @@ class Dataset(torch.utils.data.Dataset):
         }
 
     @staticmethod
-    def select_rays(select_inds, rays_o, rays_d, ray_img, near, far):
+    def select_rays(select_inds, rays_o, rays_d, rays_d_camera, ray_img, near, far):
         rays_o = rays_o[select_inds]
         rays_d = rays_d[select_inds]
         ray_img = ray_img[select_inds]
+        rays_d_camera = rays_d_camera[select_inds]
         near = near[select_inds]
         far = far[select_inds]
-        return rays_o, rays_d, ray_img, near, far
+        return rays_o, rays_d, rays_d_camera, ray_img, near, far
     
     def get_patch_ray_indices(
             self, 
@@ -397,7 +398,7 @@ class Dataset(torch.utils.data.Dataset):
 
     def sample_patch_rays(self, img, H, W,
                           subject_mask, bbox_mask, ray_mask,
-                          rays_o, rays_d, ray_img, near, far): #bbox_mask (512,512) = reshaped ray_mask (512*512,)
+                          rays_o, rays_d, rays_d_camera, ray_img, near, far): #bbox_mask (512,512) = reshaped ray_mask (512*512,)
 
         select_inds, patch_info, patch_div_indices = \
             self.get_patch_ray_indices(
@@ -408,8 +409,8 @@ class Dataset(torch.utils.data.Dataset):
                 patch_size=cfg.patch.size, 
                 H=H, W=W)
 
-        rays_o, rays_d, ray_img, near, far = self.select_rays(
-            select_inds, rays_o, rays_d, ray_img, near, far)
+        rays_o, rays_d, rays_d_camera, ray_img, near, far = self.select_rays(
+            select_inds, rays_o, rays_d, rays_d_camera, ray_img, near, far)
         
         targets = []
         for i in range(cfg.patch.N_patches):
@@ -420,7 +421,7 @@ class Dataset(torch.utils.data.Dataset):
 
         patch_masks = patch_info['mask']  # boolean array (N_patches, P, P)
 
-        return rays_o, rays_d, ray_img, near, far, \
+        return rays_o, rays_d, rays_d_camera, ray_img, near, far, \
                 target_patches, patch_masks, patch_div_indices
 
     def __len__(self):
@@ -507,13 +508,18 @@ class Dataset(torch.utils.data.Dataset):
         K[:2] *= cfg.resize_img_scale
 
         E = self.cameras[frame_name]['extrinsics']
+        R = E[:3, :3]
+        T = E[:3, 3]
+        _, rays_d_camera = get_rays_from_KRT(H, W, K, R, T)
+        rays_d_camera = rays_d_camera.reshape(-1, 3)
+
+
         E = apply_global_tfm_to_camera(
                 E=E, 
                 Rh=dst_skel_info['Rh'],
                 Th=dst_skel_info['Th'])
         R = E[:3, :3]
         T = E[:3, 3]
-
         rays_o, rays_d = get_rays_from_KRT(H, W, K, R, T)
         ray_img = img.reshape(-1, 3) 
         rays_o = rays_o.reshape(-1, 3) # (H, W, 3) --> (N_rays, 3)
@@ -526,6 +532,7 @@ class Dataset(torch.utils.data.Dataset):
         rays_o = rays_o[ray_mask]
         rays_d = rays_d[ray_mask]
         ray_img = ray_img[ray_mask]
+        rays_d_camera = rays_d_camera[ray_mask]
 
         if os.environ.get('TEST_DIR', '') != '':
             K_ = self.test_dir_camera['intrinsics'][:3, :3].copy()
@@ -549,21 +556,21 @@ class Dataset(torch.utils.data.Dataset):
         if self.ray_shoot_mode == 'image':
             pass
         elif self.ray_shoot_mode == 'patch':
-            rays_o, rays_d, ray_img, near, far, \
+            rays_o, rays_d, rays_d_camera, ray_img, near, far, \
             target_patches, patch_masks, patch_div_indices = \
                 self.sample_patch_rays(img=img, H=H, W=W,
                                        subject_mask=alpha[:, :, 0] > 0.,
                                        bbox_mask=ray_mask.reshape(H, W),
                                        ray_mask=ray_mask,
                                        rays_o=rays_o, 
-                                       rays_d=rays_d, 
+                                       rays_d=rays_d, rays_d_camera=rays_d_camera,
                                        ray_img=ray_img, 
                                        near=near, 
                                        far=far)
         else:
             assert False, f"Ivalid Ray Shoot Mode: {self.ray_shoot_mode}"
     
-        batch_rays = np.stack([rays_o, rays_d], axis=0) #
+        batch_rays = np.stack([rays_o, rays_d, rays_d_camera], axis=0) #
         if 'rays' in self.keyfilter:
             results.update({
                 'img_width': W,

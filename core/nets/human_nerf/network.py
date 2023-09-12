@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from core.utils.network_util import MotionBasisComputer
+from core.utils.transformation_util import axis_angle_to_matrix, axis_angle_to_quaternion
 from core.nets.human_nerf.component_factory import \
     load_positional_embedder, \
     load_canonical_mlp, \
@@ -381,10 +382,10 @@ class Network(nn.Module):
 
     @staticmethod
     def _unpack_ray_batch(ray_batch):
-        rays_o, rays_d = ray_batch[:,0:3], ray_batch[:,3:6] 
-        bounds = torch.reshape(ray_batch[...,6:8], [-1,1,2]) 
+        rays_o, rays_d, rays_d_camera = ray_batch[:,0:3], ray_batch[:,3:6], ray_batch[:,6:9]
+        bounds = torch.reshape(ray_batch[...,9:11], [-1,1,2]) 
         near, far = bounds[...,0], bounds[...,1] 
-        return rays_o, rays_d, near, far
+        return rays_o, rays_d, rays_d_camera, near, far
 
 
     @staticmethod
@@ -423,7 +424,7 @@ class Network(nn.Module):
             **_):
         
         N_rays = ray_batch.shape[0]
-        rays_o, rays_d, near, far = self._unpack_ray_batch(ray_batch)
+        rays_o, rays_d, rays_d_camera, near, far = self._unpack_ray_batch(ray_batch)
 
         z_vals = self._get_samples_along_ray(N_rays, near, far)
         if cfg.perturb > 0.:
@@ -433,7 +434,10 @@ class Network(nn.Module):
         if os.environ.get('TEST_DIR', '') != '':
             dir_xyz = torch.nn.functional.normalize(_['rays_d_'].float())[:,None,:] # N,1,3
         else:
-            dir_xyz = torch.nn.functional.normalize(rays_d)[:,None,:] # N,1,3
+            if cfg.canonical_mlp.view_dir_camera_only==True:
+                dir_xyz = torch.nn.functional.normalize(rays_d_camera)[:,None,:] # N,1,3
+            else:
+                dir_xyz = torch.nn.functional.normalize(rays_d)[:,None,:] # N,1,3
         dir_xyz = torch.tile(dir_xyz, [1,pts.shape[1],1])
         if dir_idx is None:
             dir_idx = torch.zeros([dir_xyz.shape[0]*dir_xyz.shape[1], 1], dtype=torch.long, device=dir_xyz.device)
@@ -545,12 +549,29 @@ class Network(nn.Module):
                 multires=cfg.non_rigid_motion_mlp.multires,                         
                 is_identity=cfg.non_rigid_motion_mlp.i_embed,
                 iter_val=iter_val,)
+        
+        if cfg.posevec.type == 'axis_angle':
+            pass 
+        elif cfg.posevec.type == 'matrix':
+            dst_posevec = dst_posevec.reshape(list(dst_posevec.shape[:-1])+[dst_posevec.shape[-1]//3,3]) #*,N,3
+            rest_matrix = axis_angle_to_matrix(torch.zeros_like(dst_posevec)) 
+            pose_matrix = axis_angle_to_matrix(dst_posevec)
+            dst_posevec = rest_matrix-pose_matrix #*,N,3,3
+            dst_posevec = dst_posevec.reshape(list(dst_posevec.shape[:-3])+[-1])
+        elif cfg.posevec.type == 'quaternion':
+            dst_posevec = dst_posevec.reshape(list(dst_posevec.shape[:-1])+[dst_posevec.shape[-1]//3,3]) #*,N,3
+            rest_quaternion = axis_angle_to_quaternion(torch.zeros_like(dst_posevec))
+            pose_quaternion = axis_angle_to_quaternion(dst_posevec)
+            dst_posevec = pose_quaternion-rest_quaternion
+            dst_posevec = dst_posevec.reshape(list(dst_posevec.shape[:-2])+[-1])
 
         if iter_val < cfg.non_rigid_motion_mlp.kick_in_iter:
             # mask-out non_rigid_mlp_input 
             non_rigid_mlp_input = torch.zeros_like(dst_posevec) * dst_posevec
         else:
             non_rigid_mlp_input = dst_posevec
+
+
         kwargs.update({
             "pos_embed_fn": self.pos_embed_fn,
             "dir_embed_fn": self.dir_embed_fn,
@@ -573,12 +594,13 @@ class Network(nn.Module):
             'motion_weights_vol': motion_weights_vol
         })
 
-        rays_o, rays_d = rays
+        rays_o, rays_d, rays_d_camera = rays
         rays_shape = rays_d.shape 
 
         rays_o = torch.reshape(rays_o, [-1,3]).float()
         rays_d = torch.reshape(rays_d, [-1,3]).float()
-        packed_ray_infos = torch.cat([rays_o, rays_d, near, far], -1)
+        rays_d_camera = torch.reshape(rays_d_camera, [-1,3]).float()
+        packed_ray_infos = torch.cat([rays_o, rays_d, rays_d_camera, near, far], -1)
 
         all_ret = self._batchify_rays(packed_ray_infos, **kwargs)
         for k in all_ret:
