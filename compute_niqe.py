@@ -8,7 +8,9 @@ name2head = defaultdict(list)
 for split in ['movement', 'novelview_all']:
     # for image_dir in ['experiments/human_nerf/zju_mocap/p387/tava/387_l1.0m0.2_4view_last2/latest',
     #     ]+[f'experiments/human_nerf/zju_mocap/p387/tava/387_4view_mh-view/latest_h{i}' for i in range(4)]:
-    for image_dir in [f'experiments/human_nerf/zju_mocap/p387/tava/387_l1.0m0.2_1view_camera{i}/latest' for i in [0,6,12,18]]:
+    #for image_dir in [f'experiments/human_nerf/zju_mocap/p387/tava/387_l1.0m0.2_1view_camera{i}/latest' for i in [0,6,12,18]]:
+    for image_dir in ['experiments/human_nerf/zju_mocap/p387/tava/387_l1.0m0.2_4view_last2_mse/latest']+ \
+        [f'experiments/human_nerf/zju_mocap/p387/tava/387_4view_mh-view_mse/latest_h{i}' for i in range(4)]:
         score_perimg_f = open(os.path.join(image_dir, f'{split}-niqe.perimg.txt'),'a')
         score_ave_f = open(os.path.join(image_dir, f'{split}-niqe.average.txt'),'a')
         scores = []

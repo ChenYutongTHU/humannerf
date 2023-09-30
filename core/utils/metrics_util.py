@@ -9,6 +9,8 @@ from collections import defaultdict
 class MetricsWriter(object):
     def __init__(self, output_dir, exp_name, dataset, lpips_computer=None):
         os.makedirs(output_dir, exist_ok=True)
+        self.output_dir = output_dir
+        self.exp_name = exp_name
         self.per_img_f = open(os.path.join(output_dir, f'{exp_name}-metrics.perimg.txt'),'a')
         self.average_f = open(os.path.join(output_dir, f'{exp_name}-metrics.average.txt'),'a')
         self.per_img_f.writelines(f'========={dataset}==========\n')

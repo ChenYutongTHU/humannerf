@@ -87,7 +87,7 @@ def main(argv):
     if cfg.get('skip',-1)>0:
         frame_list = frame_list[::cfg['skip']]
 
-    anno_path = os.path.join(subject_dir, 'annots.npy')
+    anno_path = os.path.join('data/zju/CoreView_387/annots.npy')
     annots = np.load(anno_path, allow_pickle=True).item()
 
     #load cameras

@@ -212,6 +212,8 @@ def run_movement(render_folder_name='movement'):
             dataset=cfg[render_folder_name].dataset)
 
     model.eval()
+    if os.environ.get('RETURN_POSE','False').lower()=='true':
+        pose_refine_output = {}
     for idx, batch in enumerate(tqdm(test_loader)):
         if args.test_num!=-1 and idx>=args.test_num:
             break
@@ -223,7 +225,6 @@ def run_movement(render_folder_name='movement'):
 
         with torch.no_grad():
             net_output = model(**data, iter_val=cfg.eval_iter)
-
         if multi_outputs==True:
             assert (type(net_output['rgb'])==list)
             rgbs = net_output['rgb']
@@ -247,6 +248,9 @@ def run_movement(render_folder_name='movement'):
         # import ipdb; ipdb.set_trace()
         for hid,(rgb, alpha, depth, cnl_xyz, cnl_rgb, cnl_weight, weights_on_ray, xyz_on_ray, rgb_on_ray, offset_on_ray, img_name) in \
                 enumerate(zip(rgbs, alphas, depths, cnl_xyzs, cnl_rgbs, cnl_weights, weights_on_rays, xyz_on_rays, rgb_on_rays, offsets, img_names)):
+
+            if os.environ.get('RETURN_POSE','False').lower()=='true':
+                pose_refine_output[batch['frame_name']] = net_output['POSE']
             width = batch['img_width']
             height = batch['img_height']
             ray_mask = batch['ray_mask']
@@ -340,6 +344,11 @@ def run_movement(render_folder_name='movement'):
         writer.finalize()
         metrics_writer.finalize()
     
+    if os.environ.get('RETURN_POSE','False').lower()=='true':
+        import pickle
+        with open(os.path.join(metrics_writer.output_dir, f'{metrics_writer.exp_name}-pose_refine_output.pkl'),'wb') as f:
+            pickle.dump(pose_refine_output, f)
+
         
 if __name__ == '__main__':
     globals()[f'run_{args.type}']()

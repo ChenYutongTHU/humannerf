@@ -1,4 +1,5 @@
-import os
+import os, wandb
+
 
 import torch
 import torch.nn as nn
@@ -6,6 +7,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
+# import wandb
 from third_parties.lpips import LPIPS
 
 from core.train import create_lr_updater
@@ -16,7 +18,6 @@ from core.utils.train_util import cpu_data_to_gpu, Timer
 from core.utils.image_util import tile_images, to_8b_image
 
 from configs import cfg
-import wandb
 img2mse = lambda x, y : torch.mean((x - y) ** 2)
 img2l1 = lambda x, y : torch.mean(torch.abs(x-y))
 to8b = lambda x : (255.*np.clip(x,0.,1.)).astype(np.uint8)

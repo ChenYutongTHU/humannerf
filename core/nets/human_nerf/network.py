@@ -532,17 +532,24 @@ class Network(nn.Module):
         if iter_val >= cfg.pose_decoder.get('kick_in_iter', 0) and cfg.pose_decoder_off==False:
             pose_out = self.pose_decoder(dst_posevec)
             refined_Rs = pose_out['Rs']
+            refined_rvec = pose_out['rvec']
             refined_Ts = pose_out.get('Ts', None)
             
             dst_Rs_no_root = dst_Rs[:, 1:, ...]
+            pose_refine_output = {
+                'delta_r': refined_rvec.cpu().numpy(), 
+                'R0': dst_Rs_no_root.cpu().numpy(),
+                'r0': dst_posevec.cpu().numpy()}
             dst_Rs_no_root = self._multiply_corrected_Rs(
                                         dst_Rs_no_root, 
                                         refined_Rs)
+            pose_refine_output['R1'] = dst_Rs_no_root.cpu().numpy()
             dst_Rs = torch.cat(
                 [dst_Rs[:, 0:1, ...], dst_Rs_no_root], dim=1)
 
             if refined_Ts is not None:
                 dst_Ts = dst_Ts + refined_Ts
+
 
         non_rigid_pos_embed_fn, _ = \
             self.get_non_rigid_embedder(
@@ -610,4 +617,6 @@ class Network(nn.Module):
                 k_shape = list(rays_shape[:-1]) + list(all_ret[k].shape[1:])  #3, (num_head?)
                 all_ret[k] = torch.reshape(all_ret[k], k_shape)
 
+        if os.environ.get('RETURN_POSE','False').lower()=='true':
+            all_ret['POSE'] = pose_refine_output
         return all_ret

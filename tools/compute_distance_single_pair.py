@@ -3,7 +3,7 @@ import os, pickle
 from tqdm import tqdm
 from time import time
 import torch
-import sys
+import sys, cv2
 def find_nearest_pair_gpu(pts1, pts2):
     start = time()
     dist = torch.linalg.norm(pts1[:,None,:]-pts2[None,:,:], axis=-1) # N1*N2 
@@ -20,7 +20,8 @@ def find_nearest_pair_gpu(pts1, pts2):
     #print('gather', time()-start); start = time()
     return pair_0, pair_1, dist
 
-def compute_distance_gpu(name0, name1, dist_thresh=0.002, valid_weight_threshold=0.3):
+def compute_distance_gpu(name0, name1, dist_thresh=0.002, valid_weight_threshold=0.3, 
+        output_errormap_path=None, ):
     # xyzs0, xyzs1 = framename2info[name0]['xyzs'], framename2info[name1]['xyzs']
     # rgbs0, rgbs1 = framename2info[name0]['rgbs'], framename2info[name1]['rgbs']
     mask0 = framename2info[name0][:,-1]>valid_weight_threshold
@@ -39,7 +40,23 @@ def compute_distance_gpu(name0, name1, dist_thresh=0.002, valid_weight_threshold
     #print(nearest_dist.min())
     distance = torch.sum(rgb_errors*(nearest_dist<dist_thresh))
     #print('Compute dist ', time()-start)
-    start = time()    
+    start = time()   
+    
+    if output_errormap_path is not None:
+        os.makedirs(output_errormap_path, exist_ok=True)
+        mask = nearest_dist<dist_thresh
+        e = np.clip((rgb_errors[mask]).cpu().numpy()*255, 0, 255).astype(np.uint8)
+        e = cv2.applyColorMap(e, cv2.COLORMAP_JET)[:,0,:] #N,3
+        xyzs0 = [xyzs0[p0][0].cpu().numpy() for p0 in pair_0[mask]]
+        xyzs1 = [xyzs1[p1][0].cpu().numpy() for p1 in pair_1[mask]]
+
+        import ipdb; ipdb.set_trace()
+        with open(os.path.join(output_errormap_path,f'{name0}-{name1}.obj'),'w') as f:
+            for xyzs in [xyzs0, xyzs1]:
+                for xyz, bgr in zip(xyzs, e):
+                    bgr = bgr/255
+                    f.writelines(f'v {xyz[0]:.7f} {xyz[1]:.7f} {xyz[2]:.7f} {bgr[2]:.7f} {bgr[1]:.7f} {bgr[0]:.7f}\n')
+        print('Output as ',os.path.join(output_errormap_path,f'{name0}-{name1}.obj'))
     return distance
 
 start = time()
@@ -49,30 +66,27 @@ print('Load info file ', time()-start); start = time()
 
 framenames = [f for f in sorted(framename2info.keys())]
 N = len(framenames)
-D = np.zeros([N,N], dtype=np.float32)
-
-chunk_id, chunk_n = int(sys.argv[1]), int(sys.argv[2])
-chunk_size = N//chunk_n
-# left = chunk_size*chunk_id
-# right = left+chunk_size if chunk_id!=(chunk_n-1) else N
-# print(f"{chunk_id}/{chunk_n} left={left} right={right}")
-idx = np.arange(chunk_id, N, chunk_n)
-if chunk_id==chunk_n-1:
-    idx = np.concatenate([idx,np.arange(idx[-1]+1, N)],axis=0)
-#hyper-param
+i,j=370,0
+name0, name1=framenames[i], framenames[j]
 hyper_param = {'valid_weight_threshold':0.3, 'dist_thresh':0.002}
-print(f"{chunk_id}/{chunk_n} {idx[:3]}-{idx[-3:]} num={len(idx)}")
-for i  in tqdm(idx):
-    for j in tqdm(range(i+1, N)):
-        d = compute_distance_gpu(name0=framenames[i], name1=framenames[j], **hyper_param)
-        D[i,j] = d.item()
-        D[j,i] = d.item() 
+D = np.zeros([N,N], dtype=np.float32)
+d = compute_distance_gpu(name0=name0, name1=name1, 
+        output_errormap_path=DIRNAME+f"/distance_mat_{hyper_param['valid_weight_threshold']:.2f}-{hyper_param['dist_thresh']:.2f}", 
+        **hyper_param)
+D[i,j] = d.item()
+D[j,i] = d.item() 
 
-outputfile = os.path.join(DIRNAME, 'distance_mat',
-    f"distance_mat_{hyper_param['valid_weight_threshold']:.2f}-{hyper_param['dist_thresh']:.2f}.{chunk_id}-{chunk_n}.npy")
-os.makedirs(os.path.dirname(outputfile), exist_ok=True)
-print('Save as '+ outputfile)
-np.save(outputfile, D)
+for k in [i,j]:
+    name = framenames[k]
+    mask = framename2info[name][:,-1]>hyper_param['valid_weight_threshold']
+    xyzs, rgbs, ws = framename2info[name][mask].split([3,3,1],dim=1)
+    with open(f'debug_{k}.obj','w') as f:
+        for xyz, rgb in zip(xyzs, rgbs):
+            f.writelines(f'v {xyz[0]:.7f} {xyz[1]:.7f} {xyz[2]:.7f} {rgb[0]:.7f} {rgb[1]:.7f} {rgb[2]:.7f}\n')
+
+
+
+
 
 
 

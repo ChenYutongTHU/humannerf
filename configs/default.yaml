@@ -1,5 +1,10 @@
 category: 'human_nerf'
 
+#######
+experiments:
+  color_perturbation: empty #or per-view 
+  color_perturbation_strength: strong
+  color_perturbation_according_to: camera
 
 ##############################################3
 ## Network Specs
@@ -32,6 +37,7 @@ canonical_mlp:
   i_embed: 0           # set 0 for default positional encoding, -1 for none
   view_dir: False
   view_embed: mlp #vocab or mlp
+  view_dir_camera_only: False
   view_vocab_n: 4
   view_vocab_dim: 27
   pose_color: wo
@@ -48,6 +54,9 @@ mweight_volume:
   embedding_size: 256
   volume_size: 32
   dst_voxel_size: 0.0625
+
+posevec:
+  type: axis_angle
 
 # non-rigid motion mlp
 non_rigid_motion_mlp:

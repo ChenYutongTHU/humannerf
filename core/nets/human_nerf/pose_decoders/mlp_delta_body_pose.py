@@ -37,5 +37,6 @@ class BodyPoseRefiner(nn.Module):
         Rs = self.rodriguez(rvec).view(-1, self.total_bones, 3, 3)
         
         return {
-            "Rs": Rs
+            "Rs": Rs,
+            'rvec': rvec.view(-1, self.total_bones, 3)
         }

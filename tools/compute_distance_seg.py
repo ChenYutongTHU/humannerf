@@ -23,10 +23,12 @@ def find_nearest_pair_gpu(pts1, pts2):
 def compute_distance_gpu(name0, name1, dist_thresh=0.002, valid_weight_threshold=0.3):
     # xyzs0, xyzs1 = framename2info[name0]['xyzs'], framename2info[name1]['xyzs']
     # rgbs0, rgbs1 = framename2info[name0]['rgbs'], framename2info[name1]['rgbs']
-    mask0 = framename2info[name0][:,-1]>valid_weight_threshold
-    mask1 = framename2info[name1][:,-1]>valid_weight_threshold
-    xyzs0, rgbs0, ws0 = framename2info[name0][mask0].split([3,3,1],dim=1)
-    xyzs1, rgbs1, ws1 = framename2info[name1][mask1].split([3,3,1],dim=1)
+    if framename2info[name0] is None or framename2info[name1] is None:
+        return 0
+    mask0 = framename2info[name0][:,6]>valid_weight_threshold 
+    mask1 = framename2info[name1][:,6]>valid_weight_threshold
+    xyzs0, rgbs0, ws0, _, _ = framename2info[name0][mask0].split([3,3,1,2,1],dim=1)
+    xyzs1, rgbs1, ws1, _, _ = framename2info[name1][mask1].split([3,3,1,2,1],dim=1)
     #poss0, poss1 = framename2info[name0]['poss'], framename2info[name1]['poss']
     #ind0, ind1 = framename2info[name0]['ind'], framename2info[name1]['ind']
     start = time()
@@ -44,14 +46,17 @@ def compute_distance_gpu(name0, name1, dist_thresh=0.002, valid_weight_threshold
 
 start = time()
 DIRNAME = 'experiments/human_nerf/zju_mocap/p387/tava/387_l1.0m0.2_4view_last2/latest/'
-framename2info = torch.load(f'{DIRNAME}/name-2-3d.bin')
+
+chunk_id, chunk_n, seg_name = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+framename2info = torch.load(f'{DIRNAME}/name-2-3d.{seg_name}.bin')
 print('Load info file ', time()-start); start = time()
 
 framenames = [f for f in sorted(framename2info.keys())]
 N = len(framenames)
 D = np.zeros([N,N], dtype=np.float32)
 
-chunk_id, chunk_n = int(sys.argv[1]), int(sys.argv[2])
+import ipdb; ipdb.set_trace()
+
 chunk_size = N//chunk_n
 # left = chunk_size*chunk_id
 # right = left+chunk_size if chunk_id!=(chunk_n-1) else N
@@ -63,12 +68,14 @@ if chunk_id==chunk_n-1:
 hyper_param = {'valid_weight_threshold':0.3, 'dist_thresh':0.002}
 print(f"{chunk_id}/{chunk_n} {idx[:3]}-{idx[-3:]} num={len(idx)}")
 for i  in tqdm(idx):
-    for j in tqdm(range(i+1, N)):
+    for j in range(i+1, N):
         d = compute_distance_gpu(name0=framenames[i], name1=framenames[j], **hyper_param)
-        D[i,j] = d.item()
-        D[j,i] = d.item() 
+        import ipdb; ipdb.set_trace()
+        if type(d) != int:
+            D[i,j] = d.item()
+            D[j,i] = d.item() 
 
-outputfile = os.path.join(DIRNAME, 'distance_mat',
+outputfile = os.path.join(DIRNAME, f'distance_mat_seg/{seg_name}',
     f"distance_mat_{hyper_param['valid_weight_threshold']:.2f}-{hyper_param['dist_thresh']:.2f}.{chunk_id}-{chunk_n}.npy")
 os.makedirs(os.path.dirname(outputfile), exist_ok=True)
 print('Save as '+ outputfile)

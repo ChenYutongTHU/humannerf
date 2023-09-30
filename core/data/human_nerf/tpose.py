@@ -180,7 +180,7 @@ class Dataset(torch.utils.data.Dataset):
         near = near[:, None].astype('float32')
         far = far[:, None].astype('float32')
     
-        batch_rays = np.stack([rays_o, rays_d], axis=0) 
+        batch_rays = np.stack([rays_o, rays_d, rays_d], axis=0) 
 
         if 'rays' in self.keyfilter:
             results.update({

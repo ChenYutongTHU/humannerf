@@ -51,24 +51,37 @@ framenames = [f for f in sorted(framename2info.keys())]
 N = len(framenames)
 D = np.zeros([N,N], dtype=np.float32)
 
-chunk_id, chunk_n = int(sys.argv[1]), int(sys.argv[2])
+chunk_id, chunk_n = 3, 8 #int(sys.argv[1]), int(sys.argv[2])
 chunk_size = N//chunk_n
-# left = chunk_size*chunk_id
-# right = left+chunk_size if chunk_id!=(chunk_n-1) else N
-# print(f"{chunk_id}/{chunk_n} left={left} right={right}")
+
 idx = np.arange(chunk_id, N, chunk_n)
 if chunk_id==chunk_n-1:
     idx = np.concatenate([idx,np.arange(idx[-1]+1, N)],axis=0)
 #hyper-param
 hyper_param = {'valid_weight_threshold':0.3, 'dist_thresh':0.002}
+
+
+
+chunk_id, chunk_n = int(sys.argv[1]), int(sys.argv[2])
+N3 = len(idx) #!!
+chunk_size = N3//chunk_n
+idx_3 = np.arange(chunk_id, N3, chunk_n)
+if chunk_id==chunk_n-1:
+    idx_3 = np.concatenate([idx_3,np.arange(idx_3[-1]+1, N3)],axis=0)
+#hyper-param
+hyper_param = {'valid_weight_threshold':0.3, 'dist_thresh':0.002}
+
+idx = idx[idx_3]
+
 print(f"{chunk_id}/{chunk_n} {idx[:3]}-{idx[-3:]} num={len(idx)}")
+
 for i  in tqdm(idx):
     for j in tqdm(range(i+1, N)):
         d = compute_distance_gpu(name0=framenames[i], name1=framenames[j], **hyper_param)
         D[i,j] = d.item()
         D[j,i] = d.item() 
 
-outputfile = os.path.join(DIRNAME, 'distance_mat',
+outputfile = os.path.join(DIRNAME, 'distance_mat_3',
     f"distance_mat_{hyper_param['valid_weight_threshold']:.2f}-{hyper_param['dist_thresh']:.2f}.{chunk_id}-{chunk_n}.npy")
 os.makedirs(os.path.dirname(outputfile), exist_ok=True)
 print('Save as '+ outputfile)

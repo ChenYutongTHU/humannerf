@@ -301,6 +301,15 @@ class Dataset(torch.utils.data.Dataset):
                 inter_mask[y_min:y_max, x_min:x_max], \
                 np.array([x_min, y_min]), np.array([x_max, y_max])
     
+    def perturb_pixel_according_to_dir(self, img, mask, rays_d):
+        scale = rays_d@np.array([1,1,1])
+        scale = (scale+2)/2.5
+        # print(scale.mean(), scale.min(), scale.max())
+        perturbed_img = img.copy()
+        perturbed_img = np.clip(perturbed_img*scale[...,None],0,1)
+        img = perturbed_img*mask+img*(1-mask)
+        return img.astype(np.float32)
+
     def load_image(self, frame_name, bg_color):
         if self.source_path is None:
             imagepath = os.path.join(self.image_dir, '{}.png'.format(frame_name))
@@ -324,7 +333,9 @@ class Dataset(torch.utils.data.Dataset):
         alpha_mask = alpha_mask / 255.
 
         if cfg.experiments.color_perturbation != 'empty':
-            if cfg.experiments.color_perturbation=='per_view':
+            if cfg.experiments.color_perturbation=='per_pixel':
+                pass #leave for perturb_pixel_according_to_dir(self, ) 
+            elif cfg.experiments.color_perturbation=='per_view':
                 _, camera = self.get_frame_camera(frame_name)
                 if cfg.experiments.color_perturbation_strength=='strong':
                     if camera==0:
@@ -433,7 +444,7 @@ class Dataset(torch.utils.data.Dataset):
             'frame_name': frame_name,
             'dir_idx': torch.tensor([self.views.index(self.parse_view_from_frame(frame_name))], dtype=torch.long)
         }
-
+        
         if cfg.multihead.split == 'view':
             if self.ray_shoot_mode=='image':
                 if cfg.test.head_id == -1: #multiple outputs
@@ -511,7 +522,6 @@ class Dataset(torch.utils.data.Dataset):
         R = E[:3, :3]
         T = E[:3, 3]
         _, rays_d_camera = get_rays_from_KRT(H, W, K, R, T)
-        rays_d_camera = rays_d_camera.reshape(-1, 3)
 
 
         E = apply_global_tfm_to_camera(
@@ -521,7 +531,17 @@ class Dataset(torch.utils.data.Dataset):
         R = E[:3, :3]
         T = E[:3, 3]
         rays_o, rays_d = get_rays_from_KRT(H, W, K, R, T)
+
+        if cfg.experiments.color_perturbation=='per_pixel':
+            if cfg.experiments.color_perturbation_according_to=='camera':
+                img = self.perturb_pixel_according_to_dir(img, alpha, rays_d_camera)
+            elif cfg.experiments.color_perturbation_according_to=='camera_body':
+                img = self.perturb_pixel_according_to_dir(img, alpha, rays_d)
+            else:
+                raise ValueError
+
         ray_img = img.reshape(-1, 3) 
+        rays_d_camera = rays_d_camera.reshape(-1, 3)
         rays_o = rays_o.reshape(-1, 3) # (H, W, 3) --> (N_rays, 3)
         rays_d = rays_d.reshape(-1, 3)
 
@@ -549,6 +569,7 @@ class Dataset(torch.utils.data.Dataset):
             rays_d_ = rays_d_.reshape(-1, 3)
             rays_d_ = rays_d_[ray_mask]
             results.update({'rays_d_':rays_d_})
+            results['dir_idx'] = torch.tensor([self.views.index(self.test_dir)], dtype=torch.long)
 
         near = near[:, None].astype('float32')
         far = far[:, None].astype('float32')
