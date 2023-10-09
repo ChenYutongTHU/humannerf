@@ -10,6 +10,7 @@ from core.nets.human_nerf.component_factory import \
     load_mweight_vol_decoder, \
     load_pose_decoder, \
     load_non_rigid_motion_mlp, \
+    load_non_rigid_motion_transformer_encoder, \
     load_vocab_embedder
 
 from configs import cfg
@@ -38,18 +39,30 @@ class Network(nn.Module):
         _, non_rigid_pos_embed_size = \
             self.get_non_rigid_embedder(cfg.non_rigid_motion_mlp.multires, 
                                         cfg.non_rigid_motion_mlp.i_embed)
-        self.non_rigid_mlp = \
-            load_non_rigid_motion_mlp(cfg.non_rigid_motion_mlp.module)(
-                pos_embed_size=non_rigid_pos_embed_size,
-                condition_code_size=cfg.non_rigid_motion_mlp.condition_code_size,
-                mlp_width=cfg.non_rigid_motion_mlp.mlp_width,
-                mlp_depth=cfg.non_rigid_motion_mlp.mlp_depth,
-                skips=cfg.non_rigid_motion_mlp.skips,
-                multihead_enable=cfg.non_rigid_motion_mlp.multihead.enable,
-                multihead_depth=cfg.non_rigid_motion_mlp.multihead.head_depth,
-                multihead_num=cfg.multihead.head_num,
-                last_linear_scale=cfg.non_rigid_motion_mlp.last_linear_scale,
-                mlp_depth_plus=cfg.non_rigid_motion_mlp.mlp_depth_plus)
+        if cfg.non_rigid_motion_model in ['mlp','mlp_SA']:
+            cfg_ = cfg.non_rigid_motion_mlp \
+                 if cfg.non_rigid_motion_model == 'mlp' else cfg.non_rigid_motion_mlp_sa
+            sa = {} if cfg.non_rigid_motion_model == 'mlp'  else cfg_.sa
+            self.non_rigid_mlp = \
+                load_non_rigid_motion_mlp(cfg_.module)(
+                    pos_embed_size=non_rigid_pos_embed_size,
+                    condition_code_size=cfg_.condition_code_size,
+                    mlp_width=cfg_.mlp_width,
+                    mlp_depth=cfg_.mlp_depth,
+                    skips=cfg_.skips,
+                    multihead_enable=cfg_.multihead.enable,
+                    multihead_depth=cfg_.multihead.head_depth,
+                    multihead_num=cfg.multihead.head_num,
+                    last_linear_scale=cfg_.last_linear_scale,
+                    mlp_depth_plus=cfg_.mlp_depth_plus, **sa)
+        elif cfg.non_rigid_motion_model == 'transformer_encoder':
+            self.non_rigid_mlp = \
+                load_non_rigid_motion_transformer_encoder(cfg.non_rigid_motion_transformer_encoder.module)(
+                    query_input_dim=non_rigid_pos_embed_size) # already in cfg.non_rigid_motion_transformer_encoder
+        elif cfg.non_rigid_motion_model == 'TStransformer_encoder':
+            self.non_rigid_mlp = \
+                load_non_rigid_motion_transformer_encoder(cfg.non_rigid_motion_TStransformer_encoder.module)(
+                    query_input_dim=non_rigid_pos_embed_size) # already in cfg.non_rigid_motion_transformer_encoder                
         self.non_rigid_mlp = \
             nn.DataParallel(
                 self.non_rigid_mlp,
@@ -108,6 +121,18 @@ class Network(nn.Module):
                 embedding_size=cfg.pose_decoder.embedding_size,
                 mlp_width=cfg.pose_decoder.mlp_width,
                 mlp_depth=cfg.pose_decoder.mlp_depth)
+        
+        if cfg.non_rigid_motion_mlp.time_input and not cfg.ignore_non_rigid_motions:
+            if cfg.non_rigid_motion_mlp.time_embed == 'sine':
+                get_embedder_time = load_positional_embedder(cfg.embedder.module)
+                self.time_embed_fn, time_embed_size = \
+                    get_embedder_time(cfg.non_rigid_motion_mlp.multires_time, 
+                                cfg.non_rigid_motion_mlp.time_dim)
+            elif cfg.non_rigid_motion_mlp.time_embed == 'vocab':
+                get_embedder_time = load_vocab_embedder(cfg.vocab_embedder.module)
+                self.time_embed_fn, time_embed_size = \
+                    get_embedder_time(cfg.non_rigid_motion_mlp.time_vocab_n, 
+                                    cfg.non_rigid_motion_mlp.time_vocab_dim)
     
 
     def deploy_mlps_to_secondary_gpus(self):
@@ -175,8 +200,8 @@ class Network(nn.Module):
     @staticmethod
     def _expand_input(input_data, total_elem):
         assert input_data.shape[0] == 1
-        input_size = input_data.shape[1]
-        return input_data.expand((total_elem, input_size))
+        input_size = input_data.shape[1:]
+        return input_data.expand((total_elem, )+input_size)
 
 
     def _apply_mlp_kernals(
@@ -199,6 +224,7 @@ class Network(nn.Module):
         output = {}
         # iterate ray samples by trunks
         for i in range(0, pos_flat.shape[0], chunk):
+            # print('pos_flat', pos_flat.shape[0], 'chunk',chunk)
             start = i
             end = i + chunk
             if end > pos_flat.shape[0]:
@@ -212,9 +238,11 @@ class Network(nn.Module):
                 result = self.non_rigid_mlp(
                     pos_embed=non_rigid_embed_xyz,
                     pos_xyz=xyz,
-                    condition_code=self._expand_input(non_rigid_mlp_input, total_elem),
-                    head_id=head_id_expanded
-                )
+                    condition_code=self._expand_input(non_rigid_mlp_input['condition_code'], len(cfg.secondary_gpus)), #1,(N), dim -> total_elem, (N), dim
+                    head_id=head_id_expanded,)
+                #     time_ids=self._expand_input(non_rigid_mlp_input['time_ids'], total_elem) if 'time_ids' in non_rigid_mlp_input else None,  #
+                #     joint_ids=self._expand_input(non_rigid_mlp_input['joint_ids'], total_elem) if 'joint_ids' in non_rigid_mlp_input else None, 
+                # )
                 xyz = result['xyz'] #B, 3 or list
                 ofs = result['offsets']
             else:
@@ -267,7 +295,8 @@ class Network(nn.Module):
     def _batchify_rays(self, rays_flat, **kwargs):
         all_ret = {}
         multi_outputs = False
-        for i in range(0, rays_flat.shape[0], cfg.chunk):
+        for iii,i in enumerate(range(0, rays_flat.shape[0], cfg.chunk)):
+            # print(iii, rays_flat.shape[0], cfg.chunk)
             ret = self._render_rays(rays_flat[i:i+cfg.chunk], **kwargs)
             for k in ret: #rgb, depth
                 if type(ret[k])==list:
@@ -521,6 +550,8 @@ class Network(nn.Module):
                 dst_posevec=None,
                 near=None, far=None,
                 iter_val=1e7,
+                pose_condition=None, 
+                frame_id=None, 
                 **kwargs):
         dst_Rs=dst_Rs[None, ...]
         dst_Ts=dst_Ts[None, ...]
@@ -536,14 +567,14 @@ class Network(nn.Module):
             refined_Ts = pose_out.get('Ts', None)
             
             dst_Rs_no_root = dst_Rs[:, 1:, ...]
-            pose_refine_output = {
-                'delta_r': refined_rvec.cpu().numpy(), 
-                'R0': dst_Rs_no_root.cpu().numpy(),
-                'r0': dst_posevec.cpu().numpy()}
+            # pose_refine_output = {
+            #     'delta_r': refined_rvec.cpu().numpy(), 
+            #     'R0': dst_Rs_no_root.cpu().numpy(),
+            #     'r0': dst_posevec.cpu().numpy()}
             dst_Rs_no_root = self._multiply_corrected_Rs(
                                         dst_Rs_no_root, 
                                         refined_Rs)
-            pose_refine_output['R1'] = dst_Rs_no_root.cpu().numpy()
+            #pose_refine_output['R1'] = dst_Rs_no_root.cpu().numpy()
             dst_Rs = torch.cat(
                 [dst_Rs[:, 0:1, ...], dst_Rs_no_root], dim=1)
 
@@ -557,27 +588,40 @@ class Network(nn.Module):
                 is_identity=cfg.non_rigid_motion_mlp.i_embed,
                 iter_val=iter_val,)
         
-        if cfg.posevec.type == 'axis_angle':
-            pass 
-        elif cfg.posevec.type == 'matrix':
-            dst_posevec = dst_posevec.reshape(list(dst_posevec.shape[:-1])+[dst_posevec.shape[-1]//3,3]) #*,N,3
-            rest_matrix = axis_angle_to_matrix(torch.zeros_like(dst_posevec)) 
-            pose_matrix = axis_angle_to_matrix(dst_posevec)
-            dst_posevec = rest_matrix-pose_matrix #*,N,3,3
-            dst_posevec = dst_posevec.reshape(list(dst_posevec.shape[:-3])+[-1])
-        elif cfg.posevec.type == 'quaternion':
-            dst_posevec = dst_posevec.reshape(list(dst_posevec.shape[:-1])+[dst_posevec.shape[-1]//3,3]) #*,N,3
-            rest_quaternion = axis_angle_to_quaternion(torch.zeros_like(dst_posevec))
-            pose_quaternion = axis_angle_to_quaternion(dst_posevec)
-            dst_posevec = pose_quaternion-rest_quaternion
-            dst_posevec = dst_posevec.reshape(list(dst_posevec.shape[:-2])+[-1])
+
+        non_rigid_mlp_input = []
+        if cfg.non_rigid_motion_mlp.pose_input and not cfg.ignore_non_rigid_motions:
+            if pose_condition is not None:
+                dst_posevec = pose_condition[None,...]
+            else:
+                if cfg.posevec.type == 'axis_angle':
+                    pass 
+                elif cfg.posevec.type == 'matrix':
+                    dst_posevec = dst_posevec.reshape(list(dst_posevec.shape[:-1])+[dst_posevec.shape[-1]//3,3]) #*,N,3
+                    rest_matrix = axis_angle_to_matrix(torch.zeros_like(dst_posevec))  #I
+                    pose_matrix = axis_angle_to_matrix(dst_posevec)
+                    dst_posevec = rest_matrix-pose_matrix #*,N,3,3 # so that I -> 0
+                    dst_posevec = dst_posevec.reshape(list(dst_posevec.shape[:-3])+[-1]) #*,N*9
+                elif cfg.posevec.type == 'quaternion':
+                    dst_posevec = dst_posevec.reshape(list(dst_posevec.shape[:-1])+[dst_posevec.shape[-1]//3,3]) #*,N,3
+                    rest_quaternion = axis_angle_to_quaternion(torch.zeros_like(dst_posevec))
+                    pose_quaternion = axis_angle_to_quaternion(dst_posevec)
+                    dst_posevec = pose_quaternion-rest_quaternion
+                    dst_posevec = dst_posevec.reshape(list(dst_posevec.shape[:-2])+[-1])
+            non_rigid_mlp_input.append(dst_posevec)
+
+        if cfg.non_rigid_motion_mlp.time_input:
+            if cfg.non_rigid_motion_mlp.time_embed == 'vocab':
+                time_vec = self.time_embed_fn(frame_id[None,...])
+            else:
+                time_vec = self.time_embed_fn(frame_id[None,...]/cfg.non_rigid_motion_mlp.time_vocab_n)[None,...] #N,d
+            non_rigid_mlp_input.append(time_vec)
+        non_rigid_mlp_input = torch.cat(non_rigid_mlp_input, dim=-1) #B,D
 
         if iter_val < cfg.non_rigid_motion_mlp.kick_in_iter:
             # mask-out non_rigid_mlp_input 
-            non_rigid_mlp_input = torch.zeros_like(dst_posevec) * dst_posevec
-        else:
-            non_rigid_mlp_input = dst_posevec
-
+            non_rigid_mlp_input = torch.zeros_like(non_rigid_mlp_input) * non_rigid_mlp_input
+        non_rigid_mlp_input = {'condition_code': non_rigid_mlp_input}
 
         kwargs.update({
             "pos_embed_fn": self.pos_embed_fn,

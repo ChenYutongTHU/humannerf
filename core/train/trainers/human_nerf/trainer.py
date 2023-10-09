@@ -46,6 +46,7 @@ class Trainer(object):
         print('\n********** Init Trainer ***********')
 
         network = network.cuda().deploy_mlps_to_secondary_gpus()
+
         self.network = network
 
         self.wandb_run = wandb_run

@@ -29,3 +29,8 @@ def load_non_rigid_motion_mlp(module_name):
     module = module_name
     module_path = module.replace(".", "/") + ".py"
     return imp.load_source(module, module_path).NonRigidMotionMLP
+
+def load_non_rigid_motion_transformer_encoder(module_name):
+    module = module_name
+    module_path = module.replace(".", "/") + ".py"
+    return imp.load_source(module, module_path).NonRigidMotionTransformerEncoder

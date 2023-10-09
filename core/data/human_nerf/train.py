@@ -32,6 +32,7 @@ class Dataset(torch.utils.data.Dataset):
             bgcolor=None,
             ray_shoot_mode='image',
             skip=1,
+            pose_condition_file=None,
             **_):
 
         print('[Dataset Path] ', dataset_path, '[Source Path] ', source_path) 
@@ -83,6 +84,14 @@ class Dataset(torch.utils.data.Dataset):
             self.test_dir_camera = self.cameras[[name for name in self.framelist \
                     if self.get_frame_camera(name)[1]==self.test_dir][0]]
             print('Test direction uses camera:', self.test_dir_camera)
+        
+        if pose_condition_file is not None:
+            print(f'Load pose condition from {pose_condition_file}')
+            frameid2pose_condition = np.load(pose_condition_file)
+            self.pose_condition_list = [frameid2pose_condition[self.get_frame_camera(f)[0]] for f in self.framelist]
+        else:
+            self.pose_condition_list = None
+
     def load_canonical_joints(self):
         cl_joint_path = os.path.join(self.dataset_path, 'canonical_joints.pkl')
         with open(cl_joint_path, 'rb') as f:
@@ -122,7 +131,11 @@ class Dataset(torch.utils.data.Dataset):
     def get_frame_camera(self, name):
         name = name.split('.')[0] #to remove ext
         if 'frame' in name:
-            frame, camera = name.split('_view_') #frame_000563, 12
+            if '_view_' in name:
+                frame, camera = name.split('_view_') #frame_000563, 12
+            else:
+                frame = name
+                camera = 0
             frame_int = int(frame.split('frame_')[1])
             camera_int = int(camera)
         elif 'Camera' in name:
@@ -442,6 +455,7 @@ class Dataset(torch.utils.data.Dataset):
         frame_name = self.framelist[idx]
         results = {
             'frame_name': frame_name,
+            'frame_id': self.get_frame_camera(frame_name)[0],
             'dir_idx': torch.tensor([self.views.index(self.parse_view_from_frame(frame_name))], dtype=torch.long)
         }
         
@@ -644,5 +658,12 @@ class Dataset(torch.utils.data.Dataset):
             results.update({
                 'dst_posevec': dst_posevec_69,
             })
-
+        if self.pose_condition_list is not None:
+            results['pose_condition'] = self.pose_condition_list[idx]
+            if cfg.pose_condition_random_mask != 'empty' and self.ray_shoot_mode=='patch': #during training
+                if cfg.pose_condition_random_mask=='second-half':
+                    if np.random.rand()<cfg.pose_condition_mask_prob:
+                        results['pose_condition'][len(results['pose_condition'])//2:] = 0
+                else:
+                    raise ValueError
         return results

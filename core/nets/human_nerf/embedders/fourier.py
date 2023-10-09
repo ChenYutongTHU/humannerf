@@ -1,4 +1,4 @@
-import torch
+import torch, math
 import torch.nn as nn
 
 class Embedder:
@@ -14,15 +14,22 @@ class Embedder:
             embed_fns.append(lambda x : x)
             out_dim += d
             
-        max_freq = self.kwargs['max_freq_log2']
-        N_freqs = self.kwargs['num_freqs']
-        
-        freq_bands = 2.**torch.linspace(0., max_freq, steps=N_freqs)
-        
-        for freq in freq_bands:
-            for p_fn in self.kwargs['periodic_fns']:
-                embed_fns.append(lambda x, p_fn=p_fn, freq=freq : p_fn(x * freq))
-                out_dim += d
+        freq_type = self.kwargs.get('freq_type','fourier')
+        if freq_type == 'fourier':
+            max_freq = self.kwargs['max_freq_log2']
+            N_freqs = self.kwargs['num_freqs']
+            freq_bands = 2.**torch.linspace(0., max_freq, steps=N_freqs)
+            for freq in freq_bands:
+                for p_fn in self.kwargs['periodic_fns']:
+                    embed_fns.append(lambda x, p_fn=p_fn, freq=freq : p_fn(x * freq))
+                    out_dim += d
+        elif freq_type == 'transformer':
+            d_model = self.kwargs['d_model']
+            freq_bands = torch.exp((torch.arange(0, d_model, 2, dtype=torch.float) * -(math.log(10000.0) / d_model)))
+            for freq in freq_bands:
+                for p_fn in self.kwargs['periodic_fns']:
+                    embed_fns.append(lambda x, p_fn=p_fn, freq=freq : p_fn(x * freq))
+                    out_dim += d
                     
         self.embed_fns = embed_fns
         self.out_dim = out_dim

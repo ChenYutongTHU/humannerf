@@ -5,6 +5,7 @@ from core.data import create_dataloader
 from core.nets import create_network
 from core.train import create_trainer, create_optimizer
 import wandb, os
+import torch, numpy as np
 
 def init_wandb():
     wandb.login(key='5421ff43bf1e3a6e19103432d161c885d4bbeda8')
@@ -17,7 +18,8 @@ def main():
     log = Logger()
     log.print_config()
     wandb_run = init_wandb()
-
+    torch.manual_seed(cfg.random_seed)
+    np.random.seed(cfg.random_seed)
     model = create_network()
     optimizer = create_optimizer(model)
     trainer = create_trainer(model, optimizer, wandb_run)

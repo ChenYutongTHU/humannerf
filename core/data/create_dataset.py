@@ -53,6 +53,8 @@ def create_dataset(data_type='train',**kwargs):
     if data_type in ['freeview', 'tpose']:
         args['skip'] = cfg.render_skip
 
+    if cfg.pose_condition_file != 'empty':
+        args['pose_condition_file'] = cfg.pose_condition_file
     dataset = _query_dataset(data_type)
     dataset = dataset(**args,**kwargs)
     return dataset

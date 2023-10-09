@@ -30,4 +30,10 @@ def create_network():
                 param.requires_grad = True
             if cfg.modules.non_rigid_motion_mlp.tune and 'non_rigid_mlp' in name:
                 param.requires_grad = True
+            if cfg.modules.canonical_mlp.tune and 'cnl_mlp' in name:
+                param.requires_grad = True            
+            if cfg.modules.pose_decoder.tune and 'pose_decoder' in name:
+                param.requires_grad = True 
+            if cfg.modules.mweight_vol_decoder.tune and 'mweight_vol_decoder' in name:
+                param.requires_grad = True 
     return network
