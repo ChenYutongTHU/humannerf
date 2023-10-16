@@ -17,14 +17,14 @@ class Embedder:
         freq_type = self.kwargs.get('freq_type','fourier')
         if freq_type == 'fourier':
             max_freq = self.kwargs['max_freq_log2']
-            N_freqs = self.kwargs['num_freqs']
+            N_freqs = self.kwargs['num_freqs'] #freq: [1,2,4,8,...]
             freq_bands = 2.**torch.linspace(0., max_freq, steps=N_freqs)
             for freq in freq_bands:
                 for p_fn in self.kwargs['periodic_fns']:
                     embed_fns.append(lambda x, p_fn=p_fn, freq=freq : p_fn(x * freq))
                     out_dim += d
         elif freq_type == 'transformer':
-            d_model = self.kwargs['d_model']
+            d_model = self.kwargs['d_model'] #period 1->10000 #freq: 1e-4 -> 1
             freq_bands = torch.exp((torch.arange(0, d_model, 2, dtype=torch.float) * -(math.log(10000.0) / d_model)))
             for freq in freq_bands:
                 for p_fn in self.kwargs['periodic_fns']:

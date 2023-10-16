@@ -71,7 +71,7 @@ class ImageWriter():
         os.makedirs(self.obj_dir, exist_ok=True)
         self.frame_idx = -1
         self.name_3d_together = {}
-        self.images_np = []
+        self.images_np, self.image_names = [], []
 
     def append(self, image, img_name=None):
         self.frame_idx += 1
@@ -79,6 +79,7 @@ class ImageWriter():
             img_name = f"{self.frame_idx:06d}"
         save_image(image, f'{self.image_dir}/{img_name}.png')
         self.images_np.append(image)
+        self.image_names.append(img_name)
         return self.frame_idx, img_name
     
     def append_3d(self, point3d, mask, obj_name=None, weight_img=None, depth_img=None):
@@ -118,7 +119,8 @@ class ImageWriter():
             print('Save as ', filename)
 
         #save_video
-        image_stack = np.stack(self.images_np, axis=0)
+        sorted_idx = sorted(np.arange(len(self.images_np)), key=lambda i:self.image_names[i])
+        image_stack = np.stack([self.images_np[i] for i in sorted_idx], axis=0)
         if video_name is None:
             video_name = self.image_dir+'.mp4' if self.image_dir[-1]!='/' else self.image_dir[:-1]+'.mp4'
         else:

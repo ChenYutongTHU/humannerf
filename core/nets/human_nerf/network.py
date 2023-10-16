@@ -539,7 +539,7 @@ class Network(nn.Module):
                 'weights_on_rays': weights,
                 'xyz_on_rays': xyz, 'rgb_on_rays': rgb_on_rays, 
                 'cnl_xyz':cnl_xyz, 'cnl_rgb':cnl_rgb, 'cnl_weight':cnl_weight,
-                'backward_motion_weights': backward_motion_weights,
+                'backward_motion_weights': backward_motion_weights, #unnormalized
                 'offsets': query_result['offsets']}#, multi_outputs
 
 

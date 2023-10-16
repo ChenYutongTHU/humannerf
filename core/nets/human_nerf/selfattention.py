@@ -26,17 +26,27 @@ class MlpSeq(nn.Module):
 
 class SelfAttention(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim,
-            positional_encoding_type, max_length):
+            positional_encoding_type, max_length, pe_order, pe_dim=None):
         super(SelfAttention, self).__init__()
-        self.in_proj = nn.Sequential(nn.Linear(input_dim, hidden_dim),nn.ReLU())
         self.out_proj = nn.Sequential(nn.Linear(hidden_dim, hidden_dim),nn.ReLU(),nn.Linear(hidden_dim, output_dim))
         self.positional_encoding_type = positional_encoding_type
+        self.pe_order = pe_order #after_fc or before_fc
+        if self.pe_order == 'after_fc':
+            pe_dim = hidden_dim
+        elif self.pe_order == 'before_fc':
+            pe_dim = pe_dim
+            input_dim = input_dim+pe_dim
+        self.in_proj = nn.Sequential(nn.Linear(input_dim, hidden_dim),nn.ReLU())
         if self.positional_encoding_type == 'learnable':
-            self.positional_encoding = nn.Embedding(max_length,hidden_dim)
+            self.positional_encoding = nn.Embedding(max_length,pe_dim)
         elif self.positional_encoding_type == 'sine':
             embedder = Embedder(include_input=False, input_dims=1, 
-            d_model=hidden_dim, periodic_fns=[torch.sin, torch.cos], freq_type='transformer')  
+            d_model=pe_dim, periodic_fns=[torch.sin, torch.cos], freq_type='transformer')  
             self.positional_encoding = lambda x: embedder.embed(x[:,None])   #L,1          
+        elif self.positional_encoding_type == 'sine_fourier':
+            embedder2 = Embedder(include_input=False, input_dims=1, 
+            max_freq_log2=pe_dim//2-1, num_freqs=pe_dim//2, periodic_fns=[torch.sin, torch.cos], freq_type='fourier')  
+            self.positional_encoding = lambda x: embedder2.embed(x[:,None])   #L,1             
         elif self.positional_encoding_type == 'empty':
             self.positional_encoding = None
         else:
@@ -47,13 +57,17 @@ class SelfAttention(nn.Module):
             self.attention = nn.MultiheadAttention(hidden_dim, num_heads=1, dropout=0.2, batch_first=True)
 
     def forward(self, input_seq): #B,T,D
-        x = self.in_proj(input_seq)
         if self.positional_encoding_type != 'empty':
             ids = torch.arange(input_seq.shape[1], dtype=torch.long, device=input_seq.device)
             pe = self.positional_encoding(ids)[None,...]
-            sa_input = pe+x
         else:
-            sa_input = x
+            pe = 0
+        if self.pe_order == 'before_fc' and self.positional_encoding_type != 'empty':
+            input_seq = torch.cat([input_seq, pe], axis=-1)
+            sa_input = self.in_proj(input_seq)
+        else:
+            x = self.in_proj(input_seq)
+            sa_input = x + pe
         if self.attention is not None:
             attn_output, _ = self.attention(query=sa_input, key=sa_input, value=sa_input)
             attn_output = attn_output[:,0,:] #B,N,D
