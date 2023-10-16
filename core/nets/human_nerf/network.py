@@ -133,7 +133,17 @@ class Network(nn.Module):
                 self.time_embed_fn, time_embed_size = \
                     get_embedder_time(cfg.non_rigid_motion_mlp.time_vocab_n, 
                                     cfg.non_rigid_motion_mlp.time_vocab_dim)
-    
+
+        if cfg.canonical_mlp.time_input:
+            if cfg.canonical_mlp.time_embed == 'sine':
+                get_embedder_time = load_positional_embedder(cfg.embedder.module)
+                self.time_embed_fn_cnl, time_embed_size_cnl = \
+                    get_embedder_time(cfg.canonical_mlp.time_dim//2, include_input=False)
+            elif cfg.canonical_mlp.time_embed == 'vocab':
+                get_embedder_time = load_vocab_embedder(cfg.vocab_embedder.module)
+                self.time_embed_fn_cnl, time_embed_size_cnl = \
+                    get_embedder_time(cfg.canonical_mlp.time_vocab_n, 
+                                    cfg.canonical_mlp.time_dim)    
 
     def deploy_mlps_to_secondary_gpus(self):
         self.cnl_mlp = self.cnl_mlp.to(cfg.secondary_gpus[0])
@@ -261,7 +271,9 @@ class Network(nn.Module):
                         xyz_list[head_id_].append(xyz_)
                         raws_list[head_id_] += [self.cnl_mlp(
                                     pos_embed=xyz_embedded, dir_embed=dir_embed,  
-                                    head_id=new_head_id_expanded)] #N*num_head, 4                     
+                                    head_id=new_head_id_expanded,
+                                    condition_code_cmlp=self._expand_input(non_rigid_mlp_input['condition_code_cmlp'], len(cfg.secondary_gpus)) if 'condition_code_cmlp' in non_rigid_mlp_input else None,
+                                    time_vec_cnl=self._expand_input(non_rigid_mlp_input['time_vec_cnl'], len(cfg.secondary_gpus)) if 'time_vec_cnl' in non_rigid_mlp_input else None)] #N*num_head, 4                     
                 else:
                     xyz_embedded = pos_embed_fn(xyz) #B*n_head (if argmin), 3*2*10 
                     raws_list_ = self.cnl_mlp(
@@ -277,7 +289,9 @@ class Network(nn.Module):
                 raws += [self.cnl_mlp(
                             pos_embed=xyz_embedded, dir_embed=dir_embed, 
                             pose_latent=self._expand_input(pose_latent, total_elem),
-                            head_id=head_id_expanded)] #N*num_head, 4
+                            head_id=head_id_expanded,
+                            condition_code=self._expand_input(non_rigid_mlp_input['condition_code_cmlp'], len(cfg.secondary_gpus)) if 'condition_code_cmlp' in non_rigid_mlp_input else None,
+                            time_vec_cnl=self._expand_input(non_rigid_mlp_input['time_vec_cnl'], len(cfg.secondary_gpus)) if 'time_vec_cnl' in non_rigid_mlp_input else None)] #N*num_head, 4
         
         if cfg.canonical_mlp.multihead.enable  and head_id.min()==-1:
             raws_list = [torch.cat(raws, dim=0).to(cfg.primary_gpus[0]) for raws in raws_list] 
@@ -550,7 +564,7 @@ class Network(nn.Module):
                 dst_posevec=None,
                 near=None, far=None,
                 iter_val=1e7,
-                pose_condition=None, 
+                pose_condition=None,  pose_condition_cmlp=None,
                 frame_id=None, 
                 **kwargs):
         dst_Rs=dst_Rs[None, ...]
@@ -589,7 +603,7 @@ class Network(nn.Module):
                 iter_val=iter_val,)
         
 
-        non_rigid_mlp_input = []
+        non_rigid_mlp_input, non_rigid_mlp_input_dict = [], {}
         if cfg.non_rigid_motion_mlp.pose_input and not cfg.ignore_non_rigid_motions:
             if pose_condition is not None:
                 dst_posevec = pose_condition[None,...]
@@ -616,18 +630,28 @@ class Network(nn.Module):
             else:
                 time_vec = self.time_embed_fn(frame_id[None,...]/cfg.non_rigid_motion_mlp.time_vocab_n)[None,...] #N,d
             non_rigid_mlp_input.append(time_vec)
-        non_rigid_mlp_input = torch.cat(non_rigid_mlp_input, dim=-1) #B,D
 
-        if iter_val < cfg.non_rigid_motion_mlp.kick_in_iter:
-            # mask-out non_rigid_mlp_input 
-            non_rigid_mlp_input = torch.zeros_like(non_rigid_mlp_input) * non_rigid_mlp_input
-        non_rigid_mlp_input = {'condition_code': non_rigid_mlp_input}
+        if non_rigid_mlp_input != []:
+            non_rigid_mlp_input = torch.cat(non_rigid_mlp_input, dim=-1) #B,D
 
+            if iter_val < cfg.non_rigid_motion_mlp.kick_in_iter:
+                # mask-out non_rigid_mlp_input 
+                non_rigid_mlp_input = torch.zeros_like(non_rigid_mlp_input) * non_rigid_mlp_input
+            non_rigid_mlp_input_dict['condition_code'] = non_rigid_mlp_input
+
+        if cfg.canonical_mlp.time_input:
+            if cfg.canonical_mlp.time_embed == 'vocab':
+                time_vec_cnl = self.time_embed_fn_cnl(frame_id[None,...])
+            else:
+                time_vec_cnl = self.time_embed_fn_cnl(frame_id[None,...]/cfg.canonical_mlp.time_vocab_n)[None,...] #N,d
+            non_rigid_mlp_input_dict['time_vec_cnl'] = time_vec_cnl
+        if pose_condition_cmlp is not None:
+            non_rigid_mlp_input_dict['condition_code_cmlp'] = pose_condition_cmlp[None,...]
         kwargs.update({
             "pos_embed_fn": self.pos_embed_fn,
             "dir_embed_fn": self.dir_embed_fn,
             "non_rigid_pos_embed_fn": non_rigid_pos_embed_fn,
-            "non_rigid_mlp_input": non_rigid_mlp_input,
+            "non_rigid_mlp_input": non_rigid_mlp_input_dict,
             "pose_latent": dst_posevec, 
         })
 

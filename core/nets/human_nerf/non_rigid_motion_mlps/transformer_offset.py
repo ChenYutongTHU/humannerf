@@ -63,7 +63,7 @@ class NonRigidMotionTransformerEncoder(nn.Module):
                 joint_ids = torch.arange(self.joint_number, dtype=torch.long, device=condition_code.device) #N
                 joint_ids = torch.cat([joint_ids for _ in range(num_frames)], dim=0)[None,...] #1,N
             condition_input += self.joint_embedding(joint_ids) #B,N,D
-        encoder_input = torch.cat([query_input, condition_input], dim=1) #B,N_,D
+        encoder_input = torch.cat([query_input, condition_input.expand((query_input.shape[0],)+condition_input.shape[1:])], dim=1) #B,N_,D
         output = self.encoder(src=encoder_input)[:,0,:] #B,N,E -> B,E
         trans = self.output_mlp(output) #B,3        
         result = {

@@ -12,7 +12,7 @@ from core.utils.metrics_util import MetricsWriter
 from configs import cfg, args
 from collections import defaultdict
 EXCLUDE_KEYS_TO_GPU = ['frame_name',
-                       'img_width', 'img_height', 'ray_mask']
+                       'img_width', 'img_height', 'ray_mask','img_name']
 
 
 def load_network():
@@ -110,7 +110,7 @@ def _freeview(
             alphas = [net_output['alpha']]
             depths = [net_output['depth']]
             weights_on_rays, xyz_on_rays, rgb_on_rays = [net_output['weights_on_rays']],[net_output['xyz_on_rays']],[net_output['rgb_on_rays']]
-            img_names = [None]      
+            img_names = [batch.get('img_name', None)]      
  
         for hid, (rgb, alpha, depth, img_name, weights_on_ray, xyz_on_ray, rgb_on_ray)  in enumerate(zip(rgbs, alphas, depths, img_names, weights_on_rays, xyz_on_rays, rgb_on_rays)):
             target_rgbs = batch.get('target_rgbs', None)
@@ -158,8 +158,24 @@ def run_tpose():
     cfg.ignore_non_rigid_motions = True
     _freeview(
         data_type='tpose',
-        folder_name='tpose' \
+        render_folder_name='tpose' \
             if not cfg.render_folder_name else cfg.render_folder_name)
+
+
+def run_tpose_pose_condition():
+    cfg.ignore_non_rigid_motions = True
+    import os
+    if int(os.environ.get('FORCE_NON_RIGID_MOTIONS',0))==1:
+        cfg.ignore_non_rigid_motions = False
+        _freeview(
+            data_type='tpose_pose_condition',
+            render_folder_name='tpose_pose_condition_w-delta' \
+                if not cfg.render_folder_name else cfg.render_folder_name)
+    else:
+        _freeview(
+            data_type='tpose_pose_condition',
+            render_folder_name='tpose_pose_condition' \
+                if not cfg.render_folder_name else cfg.render_folder_name)
 
 
 def run_novelpose():
@@ -167,7 +183,7 @@ def run_novelpose():
     _freeview(
         data_type=f'novelpose',
         pose_id=args.pose_id,
-        folder_name=f'novelpose/{args.pose_id}' \
+        render_folder_name=f'novelpose/{args.pose_id}' \
             if not cfg.render_folder_name else cfg.render_folder_name)   
 
 def run_novelview():
@@ -187,7 +203,7 @@ def run_train_render():
 
 def run_movement(render_folder_name='movement'):
     cfg.perturb = 0.
-    cfg.show_truth = True
+    #cfg.show_truth = True
     model = load_network()
     test_loader = create_dataloader(render_folder_name)
     multi_outputs = (cfg.multihead.head_num>1 and cfg.test.head_id==-1)

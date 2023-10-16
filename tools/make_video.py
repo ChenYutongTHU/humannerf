@@ -1,24 +1,18 @@
 import numpy as np
 from PIL import Image
-import cv2
+import cv2, os
 from glob import glob
-inputdir = 'dataset/zju_mocap/387_tava/images/*.png'
-video_name = 'dataset/zju_mocap/387_tava/video.mp4'
+import imageio
+dirs = 'experiments/human_nerf/zju_mocap/p387/tava/387_l1.0m0.2_4view_mat_len{}_2mlp/latest_inter_1_529/train_render/'
 images_np = []
-for imgname in glob(inputdir):
-    img = cv2.imread(imgname) 
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    maskname = imgname.replace('images','masks')
-    mask = cv2.imread(maskname)
-    img = cv2.resize(img, None, 
-                        fx=0.5,
-                        fy=0.5,
-                        interpolation=cv2.INTER_LANCZOS4) #H,W,3
-    mask = cv2.resize(mask, None, 
-                            fx=0.5,
-                            fy=0.5,
-                            interpolation=cv2.INTER_LINEAR)  
-    img = (img*(mask/255.)).astype(np.uint8)
-    images_np.append(img)
+video_name = 'debug_output/interpolate_387.mp4'
+for imgname in sorted(os.listdir(dirs.format(1))):
+    image = []
+    for len_ in [1,2,4]:
+        dir_ = dirs.format(len_)
+        img = cv2.imread(os.path.join(dir_,imgname)) 
+        image.append(img[:,:,[2,1,0]])
+    image = np.concatenate(image, axis=1)
+    images_np.append(image)
 image_stack = np.stack(images_np, axis=0)
 imageio.mimwrite(video_name, image_stack, format='mp4', fps=10, quality=8)

@@ -32,7 +32,7 @@ class Dataset(torch.utils.data.Dataset):
             bgcolor=None,
             ray_shoot_mode='image',
             skip=1,
-            pose_condition_file=None,
+            pose_condition_file=None,pose_condition_file_cmlp=None,
             **_):
 
         print('[Dataset Path] ', dataset_path, '[Source Path] ', source_path) 
@@ -91,6 +91,13 @@ class Dataset(torch.utils.data.Dataset):
             self.pose_condition_list = [frameid2pose_condition[self.get_frame_camera(f)[0]] for f in self.framelist]
         else:
             self.pose_condition_list = None
+
+        if pose_condition_file_cmlp is not None:
+            print(f'Load pose condition from {pose_condition_file_cmlp}')
+            frameid2pose_condition = np.load(pose_condition_file_cmlp)
+            self.pose_condition_list_cmlp = [frameid2pose_condition[self.get_frame_camera(f)[0]] for f in self.framelist]
+        else:
+            self.pose_condition_list_cmlp = None
 
     def load_canonical_joints(self):
         cl_joint_path = os.path.join(self.dataset_path, 'canonical_joints.pkl')
@@ -666,4 +673,8 @@ class Dataset(torch.utils.data.Dataset):
                         results['pose_condition'][len(results['pose_condition'])//2:] = 0
                 else:
                     raise ValueError
+        if self.pose_condition_list_cmlp is not None:
+            results['pose_condition_cmlp'] = self.pose_condition_list_cmlp[idx]
+        elif 'pose_condition' in results:
+            results['pose_condition_cmlp'] = results['pose_condition']
         return results

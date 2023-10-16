@@ -44,6 +44,23 @@ canonical_mlp:
   pose_ch: 69
   multires_dir: 4
   last_linear_scale: 1
+  condition_code_dim: 0
+  condition_code_encoder: none 
+  mlpseq:
+    hidden_dim: 128
+    output_dim: 64
+    seq_len: 8
+    non_linear: True
+    depth: 1
+  selfattention:
+    hidden_dim: 128
+    output_dim: 64
+    positional_encoding_type: learnable 
+    max_length: 8
+  time_input: False 
+  time_embed: vocab #vocab or sine
+  time_vocab_n: 654 #vocab
+  time_dim: 128 #vocab
   multihead:
     enable: False
     head_depth: 1
@@ -171,6 +188,7 @@ test_keyfilter: ['rays', 'target_rgbs',
                  'motion_bases', 'motion_weights_priors',
                   'cnl_bbox', 'dst_posevec_69']
 pose_condition_file: empty
+pose_condition_file_cmlp: empty
 pose_condition_random_mask: empty
 pose_condition_mask_prob: 0.5
 eval:
@@ -252,6 +270,10 @@ tpose:
   shuffle: False
   drop_last: False
 
+tpose_pose_condition:
+  batch_size: 1
+  shuffle: False
+  drop_last: False
 
 ##############################################3
 ## Misc
@@ -300,6 +322,7 @@ modules:
   canonical_mlp:
     reinit: False
     tune: False
+    tune_last: -1
   non_rigid_motion_mlp: 
     reinit: False
     tune: False

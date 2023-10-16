@@ -50,11 +50,13 @@ def create_dataset(data_type='train',**kwargs):
             pass #sub-sampling is already done in prepare_dataset.py  
         elif data_type == 'novelpose_eval':
             pass
-    if data_type in ['freeview', 'tpose']:
+    if data_type in ['freeview', 'tpose', 'tpose_pose_condition']:
         args['skip'] = cfg.render_skip
 
     if cfg.pose_condition_file != 'empty':
         args['pose_condition_file'] = cfg.pose_condition_file
+    if cfg.pose_condition_file_cmlp != 'empty':
+        args['pose_condition_file_cmlp'] = cfg.pose_condition_file_cmlp
     dataset = _query_dataset(data_type)
     dataset = dataset(**args,**kwargs)
     return dataset

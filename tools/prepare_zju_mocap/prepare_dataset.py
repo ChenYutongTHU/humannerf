@@ -65,7 +65,7 @@ def main(argv):
     cfg = parse_config()
     subject = cfg['dataset']['subject']
     sex = cfg['dataset']['sex']
-    max_frames = cfg['max_frames']
+    # max_frames = cfg['max_frames']
 
     dataset_dir = cfg['dataset']['zju_mocap_path']
     subject_dir = os.path.join(dataset_dir, f"CoreView_{subject}")
@@ -81,13 +81,15 @@ def main(argv):
     if 'train_split_file' in cfg:
         with open(cfg['train_split_file'], mode="r") as fp:
             frame_list = np.loadtxt(fp, dtype=int).tolist()
+        if type(frame_list) == int:
+            frame_list = [frame_list]
     else:
         frame_list = list(range(max_frames))
     
     if cfg.get('skip',-1)>0:
         frame_list = frame_list[::cfg['skip']]
 
-    anno_path = os.path.join('data/zju/CoreView_387/annots.npy')
+    anno_path = os.path.join('../../data/zju/CoreView_387/annots.npy')
     annots = np.load(anno_path, allow_pickle=True).item()
 
     #load cameras
@@ -135,7 +137,7 @@ def main(argv):
     for idx, ipath in enumerate(tqdm(img_paths)):
         frame_id, select_view = idx//len(multi_select_view), idx%len(multi_select_view)
         frame_id, select_view = frame_list[frame_id], multi_select_view[select_view] #!!
-        if cfg["v2"]:
+        if cfg.get("v2", True):
             out_name = ipath
         else:
             if len(multi_select_view)==1:
@@ -187,13 +189,13 @@ def main(argv):
 
         # load and write mask
         mask = get_mask(subject_dir, ipath)
-        if cfg["v2"]:
+        if cfg.get("v2", True):
             pass
         else:
             save_image(to_3ch_image(mask), 
                     os.path.join(out_mask_dir, out_name+'.png'))
 
-        if cfg["v2"]:
+        if cfg.get("v2", True):
             pass
         else:
             # write image

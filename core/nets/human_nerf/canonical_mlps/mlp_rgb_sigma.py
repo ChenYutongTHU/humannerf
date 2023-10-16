@@ -1,8 +1,10 @@
-import torch
+import torch, os
 import torch.nn as nn
 
 from core.utils.network_util import initseq
 from core.nets.human_nerf.multihead import MultiheadMlp
+from core.nets.human_nerf.selfattention import SelfAttention, MlpSeq
+from configs import cfg 
 
 class CanonicalMLP(nn.Module):
     def __init__(self, mlp_depth=8, mlp_width=256, 
@@ -27,7 +29,27 @@ class CanonicalMLP(nn.Module):
         self.input_ch_dir = input_ch_dir
         self.multihead_enable, self.multihead_num = multihead_enable, multihead_num
         self.multihead_depth = multihead_depth
-        pts_block_mlps = [nn.Linear(input_ch, mlp_width), nn.ReLU()]
+        self.condition_code_dim = cfg.canonical_mlp.condition_code_dim
+        if self.condition_code_dim>0:
+            if cfg.canonical_mlp.condition_code_encoder.lower() == 'selfattention':
+                self.condition_code_encoder = SelfAttention(input_dim=self.condition_code_dim,**cfg.canonical_mlp.selfattention)
+                condition_ch = cfg.canonical_mlp.selfattention.output_dim
+            elif cfg.canonical_mlp.condition_code_encoder.lower() == 'mlpseq':
+                self.condition_code_encoder = MlpSeq(input_dim=self.condition_code_dim,**cfg.canonical_mlp.mlpseq)
+                condition_ch = cfg.canonical_mlp.mlpseq.output_dim
+            elif cfg.canonical_mlp.condition_code_encoder.lower() == 'none':
+                self.condition_code_encoder = torch.nn.Identity()
+                condition_ch = self.condition_code_dim
+        else:
+            self.condition_code_encoder = None
+            condition_ch = 0
+        
+        self.time_input = cfg.canonical_mlp.time_input
+        if self.time_input:
+            time_ch = cfg.canonical_mlp.time_dim
+        else:
+            time_ch = 0
+        pts_block_mlps = [nn.Linear(input_ch+condition_ch+time_ch, mlp_width), nn.ReLU()]
         layers_to_cat_input = []
         for i in range(mlp_depth+mlp_depth_plus-1):
             if i in skips:
@@ -63,6 +85,12 @@ class CanonicalMLP(nn.Module):
         else:
             if self.multihead_enable==False:
                 self.output_linear = nn.Sequential(nn.Linear(mlp_width*last_linear_scale, 4))
+                if int(os.environ.get('TUNE_C',0))==1:
+                    del self.output_linear
+                    self.output_linear = None
+                    self.output_linear_density = nn.Sequential(nn.Linear(mlp_width*last_linear_scale, 1))
+                    self.output_linear_rgb = nn.Sequential(nn.Linear(mlp_width*last_linear_scale, 3))
+
             else:
                 '''
                 output_list = []
@@ -89,8 +117,15 @@ class CanonicalMLP(nn.Module):
                 nn.Linear(mlp_width, 1)) #output a scalar
             self.ao_activation = torch.nn.Sigmoid()
 
-    def forward(self, pos_embed, dir_embed=None, head_id=None, pose_latent=None, **_):
-        h = pos_embed # B(*n_head), dim
+    def forward(self, pos_embed, dir_embed=None, condition_code=None, head_id=None, pose_latent=None, time_vec_cnl=None, **_):
+        h = [pos_embed]
+        if self.condition_code_dim>0:
+            assert condition_code is not None
+            condition_code_ = self.condition_code_encoder(condition_code)
+            h += [condition_code_.expand((pos_embed.shape[0],)+condition_code_.shape[1:])]
+        if self.time_input:
+            h += [time_vec_cnl.expand((pos_embed.shape[0],)+time_vec_cnl.shape[1:])]
+        h = torch.cat(h, dim=1)
         for i, _ in enumerate(self.pts_linears):
             if i in self.layers_to_cat_input:
                 h = torch.cat([pos_embed, h], dim=-1)
@@ -104,6 +139,7 @@ class CanonicalMLP(nn.Module):
                 features.append(dir_embed)
             if self.pose_color=='direct':
                 features.append(pose_latent)
+
             rgb = self.output_linear_rgb_2(torch.cat(features,dim=1))
             outputs = torch.cat([rgb, density],dim=1) #N, 4
         else:
@@ -122,7 +158,10 @@ class CanonicalMLP(nn.Module):
                     else:
                         outputs = self.multihead_mlp(h, head_id)
             else:
-                outputs = self.output_linear(h)
+                if int(os.environ.get('TUNE_C',0))==1:
+                    outputs = torch.cat([self.output_linear_rgb(h), self.output_linear_density(h)], axis=1)
+                else:
+                    outputs = self.output_linear(h)
         
         if self.pose_color == 'ao':
             feature = self.output_linear_ao_1(h)
