@@ -3,7 +3,8 @@ import torch.nn as nn
 
 from core.utils.network_util import initseq
 from core.nets.human_nerf.multihead import MultiheadMlp
-
+from core.nets.human_nerf.localize import localize_condition_code
+from configs import cfg
 class NonRigidMotionMLP(nn.Module):
     def __init__(self,
                  pos_embed_size=3, 
@@ -70,12 +71,12 @@ class NonRigidMotionMLP(nn.Module):
                 last_layer.bias.data.zero_()                
 
 
-    def forward(self, pos_embed, pos_xyz, condition_code, viewdirs=None, head_id=None ,**_):
-        condition_code = condition_code.expand((pos_embed.shape[0],-1))
+    def forward(self, pos_embed, pos_xyz, condition_code, viewdirs=None, head_id=None, weights=None, **_):
+        condition_code = condition_code.expand((pos_embed.shape[0],-1)) #P,D
+        condition_code = localize_condition_code(condition_code, weights)
         h = torch.cat([condition_code, pos_embed], dim=-1)
         if viewdirs is not None:
             h = torch.cat([h, viewdirs], dim=-1)
-
         for i in range(len(self.block_mlps)):
             if i in self.layers_to_cat_inputs:
                 h = torch.cat([h, pos_embed], dim=-1)

@@ -4,6 +4,7 @@ import torch.nn as nn
 from core.utils.network_util import initseq
 from core.nets.human_nerf.multihead import MultiheadMlp
 from core.nets.human_nerf.selfattention import SelfAttention, MlpSeq
+from core.nets.human_nerf.localize import localize_condition_code
 from configs import cfg 
 
 class CanonicalMLP(nn.Module):
@@ -117,12 +118,16 @@ class CanonicalMLP(nn.Module):
                 nn.Linear(mlp_width, 1)) #output a scalar
             self.ao_activation = torch.nn.Sigmoid()
 
-    def forward(self, pos_embed, dir_embed=None, condition_code=None, head_id=None, pose_latent=None, time_vec_cnl=None, **_):
+    def forward(self, pos_embed, dir_embed=None, condition_code=None, head_id=None, pose_latent=None, time_vec_cnl=None, weights=None, **_):
         h = [pos_embed]
         if self.condition_code_dim>0:
             assert condition_code is not None
             condition_code_ = self.condition_code_encoder(condition_code)
-            h += [condition_code_.expand((pos_embed.shape[0],)+condition_code_.shape[1:])]
+            if cfg.condition_code.type == 'local':
+                assert cfg.canonical_mlp.condition_code_encoder.lower() == 'none'
+                condition_code_ = condition_code_.expand((pos_embed.shape[0],)+condition_code_.shape[1:])
+                condition_code_ = localize_condition_code(condition_code_, weights)
+            h += [condition_code_]
         if self.time_input:
             h += [time_vec_cnl.expand((pos_embed.shape[0],)+time_vec_cnl.shape[1:])]
         h = torch.cat(h, dim=1)

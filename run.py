@@ -203,7 +203,7 @@ def run_train_render():
 
 def run_movement(render_folder_name='movement'):
     cfg.perturb = 0.
-    #cfg.show_truth = True
+    cfg.show_truth = True
     model = load_network()
     test_loader = create_dataloader(render_folder_name)
     multi_outputs = (cfg.multihead.head_num>1 and cfg.test.head_id==-1)

@@ -161,10 +161,11 @@ class Network(nn.Module):
             non_rigid_mlp_input,
             dir_xyz, dir_idx, 
             dir_embed_fn, 
-            head_id, pose_latent):
+            head_id, pose_latent, backward_motion_weights):
 
         # (N_rays, N_samples, 3) --> (N_rays x N_samples, 3)
         pos_flat = torch.reshape(pos_xyz, [-1, pos_xyz.shape[-1]])
+        weights_flat = torch.reshape(backward_motion_weights, [-1, backward_motion_weights.shape[-1]])
         if cfg.canonical_mlp.view_embed == 'mlp':
             dir_flat = torch.reshape(dir_xyz, [-1, dir_xyz.shape[-1]])
         elif cfg.canonical_mlp.view_embed == 'vocab':
@@ -178,7 +179,7 @@ class Network(nn.Module):
                         non_rigid_pos_embed_fn=non_rigid_pos_embed_fn,
                         dir_flat=dir_flat, 
                         dir_embed_fn=dir_embed_fn,
-                        chunk=chunk, head_id=head_id, pose_latent=pose_latent)
+                        chunk=chunk, head_id=head_id, pose_latent=pose_latent, weights_flat=weights_flat)
 
         output = {}
 
@@ -222,7 +223,7 @@ class Network(nn.Module):
             non_rigid_pos_embed_fn,
             dir_flat, 
             dir_embed_fn,
-            chunk, head_id, pose_latent):
+            chunk, head_id, pose_latent, weights_flat):
 
         if cfg.canonical_mlp.multihead.enable and head_id==-1:
             raws_list = [[] for i in range(cfg.multihead.head_num)]
@@ -242,6 +243,7 @@ class Network(nn.Module):
             total_elem = end - start
 
             xyz, dir_ = pos_flat[start:end], dir_flat[start:end]
+            weights = weights_flat[start:end]
             head_id_expanded = self._expand_input(head_id[None, None, ...], total_elem)
             if not cfg.ignore_non_rigid_motions:
                 non_rigid_embed_xyz = non_rigid_pos_embed_fn(xyz)
@@ -249,7 +251,7 @@ class Network(nn.Module):
                     pos_embed=non_rigid_embed_xyz,
                     pos_xyz=xyz,
                     condition_code=self._expand_input(non_rigid_mlp_input['condition_code'], len(cfg.secondary_gpus)), #1,(N), dim -> total_elem, (N), dim
-                    head_id=head_id_expanded,)
+                    head_id=head_id_expanded,weights=weights)
                 #     time_ids=self._expand_input(non_rigid_mlp_input['time_ids'], total_elem) if 'time_ids' in non_rigid_mlp_input else None,  #
                 #     joint_ids=self._expand_input(non_rigid_mlp_input['joint_ids'], total_elem) if 'joint_ids' in non_rigid_mlp_input else None, 
                 # )
@@ -273,7 +275,8 @@ class Network(nn.Module):
                                     pos_embed=xyz_embedded, dir_embed=dir_embed,  
                                     head_id=new_head_id_expanded,
                                     condition_code_cmlp=self._expand_input(non_rigid_mlp_input['condition_code_cmlp'], len(cfg.secondary_gpus)) if 'condition_code_cmlp' in non_rigid_mlp_input else None,
-                                    time_vec_cnl=self._expand_input(non_rigid_mlp_input['time_vec_cnl'], len(cfg.secondary_gpus)) if 'time_vec_cnl' in non_rigid_mlp_input else None)] #N*num_head, 4                     
+                                    time_vec_cnl=self._expand_input(non_rigid_mlp_input['time_vec_cnl'], len(cfg.secondary_gpus)) if 'time_vec_cnl' in non_rigid_mlp_input else None,
+                                    weights=weights)]  #N*num_head, 4                     
                 else:
                     xyz_embedded = pos_embed_fn(xyz) #B*n_head (if argmin), 3*2*10 
                     raws_list_ = self.cnl_mlp(
@@ -291,7 +294,8 @@ class Network(nn.Module):
                             pose_latent=self._expand_input(pose_latent, total_elem),
                             head_id=head_id_expanded,
                             condition_code=self._expand_input(non_rigid_mlp_input['condition_code_cmlp'], len(cfg.secondary_gpus)) if 'condition_code_cmlp' in non_rigid_mlp_input else None,
-                            time_vec_cnl=self._expand_input(non_rigid_mlp_input['time_vec_cnl'], len(cfg.secondary_gpus)) if 'time_vec_cnl' in non_rigid_mlp_input else None)] #N*num_head, 4
+                            time_vec_cnl=self._expand_input(non_rigid_mlp_input['time_vec_cnl'], len(cfg.secondary_gpus)) if 'time_vec_cnl' in non_rigid_mlp_input else None,
+                            weights=weights)] #N*num_head, 4
         
         if cfg.canonical_mlp.multihead.enable  and head_id.min()==-1:
             raws_list = [torch.cat(raws, dim=0).to(cfg.primary_gpus[0]) for raws in raws_list] 
@@ -505,7 +509,7 @@ class Network(nn.Module):
                                 non_rigid_pos_embed_fn=non_rigid_pos_embed_fn,
                                 dir_embed_fn=dir_embed_fn,
                                 dir_xyz=dir_xyz, dir_idx=dir_idx, 
-                                head_id=head_id, pose_latent=pose_latent)
+                                head_id=head_id, pose_latent=pose_latent, backward_motion_weights=backward_motion_weights)
         raw = query_result['raws']
         xyz = query_result['xyzs']
         
@@ -647,6 +651,7 @@ class Network(nn.Module):
             non_rigid_mlp_input_dict['time_vec_cnl'] = time_vec_cnl
         if pose_condition_cmlp is not None:
             non_rigid_mlp_input_dict['condition_code_cmlp'] = pose_condition_cmlp[None,...]
+
         kwargs.update({
             "pos_embed_fn": self.pos_embed_fn,
             "dir_embed_fn": self.dir_embed_fn,

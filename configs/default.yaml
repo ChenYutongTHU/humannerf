@@ -27,6 +27,12 @@ vocab_embedder:
 non_rigid_embedder:
   module: "core.nets.human_nerf.embedders.hannw_fourier"
 
+condition_code:
+  type: global #local
+  local:
+    threshold: -1. # -1 stands for x directly. [0,1] stands for a threhold for binarization
+
+
 # canonical mlp
 canonical_mlp:
   module: 'core.nets.human_nerf.canonical_mlps.mlp_rgb_sigma'
