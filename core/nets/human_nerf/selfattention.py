@@ -26,7 +26,7 @@ class MlpSeq(nn.Module):
 
 class SelfAttention(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim,
-            positional_encoding_type, max_length, pe_order, pe_dim=None):
+            positional_encoding_type, max_length, pe_order, pe_dim=None, in_proj='fc-relu'):
         super(SelfAttention, self).__init__()
         self.out_proj = nn.Sequential(nn.Linear(hidden_dim, hidden_dim),nn.ReLU(),nn.Linear(hidden_dim, output_dim))
         self.positional_encoding_type = positional_encoding_type
@@ -36,7 +36,10 @@ class SelfAttention(nn.Module):
         elif self.pe_order == 'before_fc':
             pe_dim = pe_dim
             input_dim = input_dim+pe_dim
-        self.in_proj = nn.Sequential(nn.Linear(input_dim, hidden_dim),nn.ReLU())
+        if in_proj == 'fc-relu':
+            self.in_proj = nn.Sequential(nn.Linear(input_dim, hidden_dim),nn.ReLU())
+        elif in_proj == 'fc-relu-fc':
+            self.in_proj = nn.Sequential(nn.Linear(input_dim, hidden_dim),nn.ReLU(), nn.Linear(hidden_dim, hidden_dim))
         if self.positional_encoding_type == 'learnable':
             self.positional_encoding = nn.Embedding(max_length,pe_dim)
         elif self.positional_encoding_type == 'sine':
@@ -46,7 +49,7 @@ class SelfAttention(nn.Module):
         elif self.positional_encoding_type == 'sine_fourier':
             embedder2 = Embedder(include_input=False, input_dims=1, 
             max_freq_log2=pe_dim//2-1, num_freqs=pe_dim//2, periodic_fns=[torch.sin, torch.cos], freq_type='fourier')  
-            self.positional_encoding = lambda x: embedder2.embed(x[:,None])   #L,1             
+            self.positional_encoding = lambda x: embedder2.embed(x[:,None]/(cfg.canonical_mlp.selfattention.max_length-1))   #L,1             
         elif self.positional_encoding_type == 'empty':
             self.positional_encoding = None
         else:

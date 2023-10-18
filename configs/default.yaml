@@ -65,6 +65,7 @@ canonical_mlp:
     pe_order: after_fc
     pe_dim: 32
     max_length: 8
+    in_proj: fc-relu
   time_input: False 
   time_embed: vocab #vocab or sine
   time_vocab_n: 654 #vocab

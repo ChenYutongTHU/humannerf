@@ -12,7 +12,7 @@ train:
 
 train_render:
   dataset_module: 'core.data.human_nerf.train'
-  dataset: 'zju_387_nb_4view_train'
+  dataset: 'zju_387_nb_1view_test'
 
 progress:
   dataset_module: 'core.data.human_nerf.train'
@@ -35,8 +35,8 @@ tpose_pose_condition: #TODO
   dataset: 'zju_387_test'
 
 novelpose: 
-  dataset_module: 'core.data.human_nerf.novelpose'
-  dataset: 'zju_387_nb_4view_novelpose'
+  dataset_module: 'core.data.human_nerf.train'
+  dataset: 'zju_387_nb_1view_novelpose'
 
 novelview:
   dataset_module: 'core.data.human_nerf.train'

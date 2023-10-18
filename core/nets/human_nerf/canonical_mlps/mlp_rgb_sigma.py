@@ -123,9 +123,9 @@ class CanonicalMLP(nn.Module):
         if self.condition_code_dim>0:
             assert condition_code is not None
             condition_code_ = self.condition_code_encoder(condition_code)
+            condition_code_ = condition_code_.expand((pos_embed.shape[0],)+condition_code_.shape[1:])
             if cfg.condition_code.type == 'local':
                 assert cfg.canonical_mlp.condition_code_encoder.lower() == 'none'
-                condition_code_ = condition_code_.expand((pos_embed.shape[0],)+condition_code_.shape[1:])
                 condition_code_ = localize_condition_code(condition_code_, weights)
             h += [condition_code_]
         if self.time_input:
