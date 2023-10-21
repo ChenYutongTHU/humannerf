@@ -149,6 +149,9 @@ class Dataset(torch.utils.data.Dataset):
             camera, frame = name.split('/')
             camera_int = int(camera.split('Camera_B')[1])
             frame_int = int(frame)
+        else:
+            frame_int = int(name)
+            camera_int  =0
         return frame_int, camera_int
 
     def load_train_frames(self):
@@ -337,6 +340,8 @@ class Dataset(torch.utils.data.Dataset):
                                     'masks', 
                                     '{}.png'.format(frame_name))
             alpha_mask = np.array(load_image(maskpath))
+            if alpha_mask.max()==1:
+                alpha_mask *= 255
         else:
             imagepath = os.path.join(self.image_dir, frame_name)
             alpha_mask = to_3ch_image(get_mask(self.source_path, img_name=frame_name))

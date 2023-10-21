@@ -9,14 +9,14 @@ SMPL_JOINT_IDX = {
     'belly_button': 3,
     'left_knee': 4,
     'right_knee': 5,
-    'lower_chest': 6,
+    'lower_chest': 6, #alias: spine
     'left_ankle': 7,
     'right_ankle': 8,
-    'upper_chest': 9,
+    'upper_chest': 9, #chest
     'left_toe': 10,
     'right_toe': 11,
     'neck': 12,
-    'left_clavicle': 13,
+    'left_clavicle': 13, #linshoulder
     'right_clavicle': 14,
     'head': 15,
     'left_shoulder': 16,
@@ -302,15 +302,14 @@ def approx_gaussian_bone_volumes(
         for bone_idx, parent_idx in SMPL_PARENT.items():
             if joint_idx != parent_idx:
                 continue
-
-            S = _std_to_scale_mtx(BONE_STDS * 2.)
+            S = _std_to_scale_mtx(BONE_STDS * 2.) #[3,] -> [3,3] isotropic matrix eyes scale is inverse to std?
             if joint_idx in TORSO_JOINTS:
                 S[0][0] *= 1/1.5
                 S[2][2] *= 1/1.5
 
-            start_joint = tpose_joints[SMPL_PARENT[bone_idx]]
+            start_joint = tpose_joints[SMPL_PARENT[bone_idx]] #or tpose_joints[parent_idx]
             end_joint = tpose_joints[bone_idx]
-            target_bone = (end_joint - start_joint)[None, :]
+            target_bone = (end_joint - start_joint)[None, :] #[1,3] #the direction
 
             R = _get_rotation_mtx(calibrated_bone, target_bone)[0].astype(np.float32)
 
@@ -328,7 +327,7 @@ def approx_gaussian_bone_volumes(
         if not is_parent_joint:
             # The joint is not other joints' parent, meaning it is an end joint
             joint_stds = HEAD_STDS if joint_idx == SMPL_JOINT_IDX['head'] else JOINT_STDS
-            S = _std_to_scale_mtx(joint_stds * 2.)
+            S = _std_to_scale_mtx(joint_stds * 2.) #[3,3,3]
 
             center = tpose_joints[joint_idx]
             gaussian_volume = _deform_gaussian_volume(
@@ -341,7 +340,6 @@ def approx_gaussian_bone_volumes(
             
         g_volumes.append(gaussian_volume)
     g_volumes = np.stack(g_volumes, axis=0)
-
     # concatenate background weights
     bg_volume = 1.0 - np.sum(g_volumes, axis=0, keepdims=True).clip(min=0.0, max=1.0)
     g_volumes = np.concatenate([g_volumes, bg_volume], axis=0)

@@ -6,8 +6,9 @@ from core.nets.human_nerf.multihead import MultiheadMlp
 from core.nets.human_nerf.embedders.fourier import Embedder
 from configs import cfg
 class MlpSeq(nn.Module):
-    def __init__(self, input_dim, seq_len, hidden_dim, output_dim, non_linear, depth=1, ):
+    def __init__(self, input_dim, seq_len, hidden_dim, output_dim, non_linear, depth=1, **kwargs):
         super(MlpSeq, self).__init__()
+        self.output_dim = output_dim
         module_list = []
         for i in range(depth):
             if i==0:
@@ -30,12 +31,14 @@ class SelfAttention(nn.Module):
         super(SelfAttention, self).__init__()
         self.out_proj = nn.Sequential(nn.Linear(hidden_dim, hidden_dim),nn.ReLU(),nn.Linear(hidden_dim, output_dim))
         self.positional_encoding_type = positional_encoding_type
+        self.output_dim = output_dim
         self.pe_order = pe_order #after_fc or before_fc
-        if self.pe_order == 'after_fc':
-            pe_dim = hidden_dim
-        elif self.pe_order == 'before_fc':
-            pe_dim = pe_dim
-            input_dim = input_dim+pe_dim
+        if self.positional_encoding_type != 'empty':
+            if self.pe_order == 'after_fc':
+                pe_dim = hidden_dim
+            elif self.pe_order == 'before_fc':
+                pe_dim = pe_dim
+                input_dim = input_dim+pe_dim
         if in_proj == 'fc-relu':
             self.in_proj = nn.Sequential(nn.Linear(input_dim, hidden_dim),nn.ReLU())
         elif in_proj == 'fc-relu-fc':
@@ -66,6 +69,7 @@ class SelfAttention(nn.Module):
         else:
             pe = 0
         if self.pe_order == 'before_fc' and self.positional_encoding_type != 'empty':
+            pe = pe.expand((input_seq.shape[0],-1,-1))
             input_seq = torch.cat([input_seq, pe], axis=-1)
             sa_input = self.in_proj(input_seq)
         else:

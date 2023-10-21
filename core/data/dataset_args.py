@@ -104,6 +104,12 @@ class DatasetArgs(object):
                     "ray_shoot_mode": 'image',
                     "subject": sub,                        
                 },
+                f"zju_387_nb_rightlimb_32":{
+                    "dataset_path": f"dataset/zju_mocap/387_nb_pose_rightlimb_32",
+                    "keyfilter": cfg.test_keyfilter,
+                    "ray_shoot_mode": 'image',
+                    "subject": sub,                        
+                },
                 f"zju_{sub}_tava_train_render": {
                     "dataset_path": f"dataset/zju_mocap/{sub}_tava",
                     "keyfilter": cfg.test_keyfilter,

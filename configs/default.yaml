@@ -51,7 +51,7 @@ canonical_mlp:
   multires_dir: 4
   last_linear_scale: 1
   condition_code_dim: 0
-  condition_code_encoder: none 
+  condition_code_encoder: none  #or input_encoder
   mlpseq:
     hidden_dim: 128
     output_dim: 64
@@ -66,6 +66,37 @@ canonical_mlp:
     pe_dim: 32
     max_length: 8
     in_proj: fc-relu
+  #***************************************
+  input_encoder:
+    enable: False
+    seq_len: 8
+    temporal_enc_method: selfattention #or mlp or fourier? or empty
+    temporal_enc_cfg_selfattention:
+      hidden_dim: 64
+      output_dim: 32
+      positional_encoding_type: sine_fourier
+      #pe_order: before_fc default
+      #max_length: 32 seq_len
+      pe_dim: 8
+      #in_proj: 'fc-relu'
+    temporal_enc_cfg_mlp:
+      hidden_dim: 64
+      output_dim: 32
+      non_linear: True
+      depth: 1
+
+    spatial_localize_cfg: 
+      enable: True
+      threshold: -1.
+
+    spatial_enc_method: mlp #or mlp or weight-masking
+    spatial_enc_cfg_mlp:
+      hidden_dim: 64
+      output_dim: 32
+      non_linear: True
+      depth: 1
+    fuse_method: concat
+  #***************************************
   time_input: False 
   time_embed: vocab #vocab or sine
   time_vocab_n: 654 #vocab

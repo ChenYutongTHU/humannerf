@@ -50,5 +50,6 @@ novelpose_eval:
   dataset_module: 'core.data.human_nerf.train'
   dataset: 'zju_387_nb_4view_novelpose'
 
+
 bgcolor: [0., 0., 0.]
 resize_img_scale: 0.5
