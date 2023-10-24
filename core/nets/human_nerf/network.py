@@ -387,12 +387,12 @@ class Network(nn.Module):
         motion_weights = motion_weights_vol[:-1] 
 
         weights_list = []
-        for i in range(motion_weights.size(0)):
+        for i in range(motion_weights.size(0)): #iteratve over joints
             pos = torch.matmul(motion_scale_Rs[i, :, :], pts.T).T + motion_Ts[i, :]
             pos = (pos - cnl_bbox_min_xyz[None, :]) \
                             * cnl_bbox_scale_xyz[None, :] - 1.0 
             weights = F.grid_sample(input=motion_weights[None, i:i+1, :, :, :], 
-                                    grid=pos[None, None, None, :, :],           
+                                    grid=pos[None, None, None, :, :],         
                                     padding_mode='zeros', align_corners=True)
             weights = weights[0, 0, 0, 0, :, None] 
             weights_list.append(weights) 
@@ -501,7 +501,6 @@ class Network(nn.Module):
         pts_mask = mv_output['fg_likelihood_mask']
         cnl_pts = mv_output['x_skel']
         backward_motion_weights = mv_output['backward_motion_weights']
-
         query_result = self._query_mlp(
                                 pos_xyz=cnl_pts, 
                                 non_rigid_mlp_input=non_rigid_mlp_input,

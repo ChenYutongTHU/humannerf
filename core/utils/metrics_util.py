@@ -54,7 +54,7 @@ class MetricsWriter(object):
     def finalize(self):
         self.metrics2ave = {k:v/self.N for k,v in self.metrics2ave.items()}      
         for k, v in self.metrics2ave.items():
-            self.average_f.writelines(f'{k}:{v:.4f}\n') 
+            self.average_f.writelines(f'{k[0]}:{v:.4f}\n') 
 
         self.per_img_f.close()
         self.average_f.close()

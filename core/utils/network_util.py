@@ -149,11 +149,10 @@ class MotionBasisComputer(nn.Module):
         
         cnl_gtfms = cnl_gtfms.view(-1, 4, 4)
         f_mtx = torch.matmul(cnl_gtfms, inv_dst_gtfms)
-        f_mtx = f_mtx.view(-1, self.total_bones, 4, 4)
+        f_mtx = f_mtx.view(-1, self.total_bones, 4, 40)
 
         scale_Rs = f_mtx[:, :, :3, :3]
         Ts = f_mtx[:, :, :3, 3]
-
         return scale_Rs, Ts
 
 

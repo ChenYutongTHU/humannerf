@@ -35,7 +35,6 @@ class BodyPoseRefiner(nn.Module):
     def forward(self, pose_input):
         rvec = self.block_mlps(pose_input).view(-1, 3)
         Rs = self.rodriguez(rvec).view(-1, self.total_bones, 3, 3)
-        
         return {
             "Rs": Rs,
             'rvec': rvec.view(-1, self.total_bones, 3)
