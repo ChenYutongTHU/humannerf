@@ -43,6 +43,8 @@ def create_dataset(data_type='train',**kwargs):
         if data_type == 'progress':
             args['skip'] = total_train_imgs // 16
             args['maxframes'] = 16
+            args['ray_shoot_mode'] = 'image'
+            args['keyfilter'] = cfg.test_keyfilter
         elif data_type == 'movement':
             args['skip'] = total_train_imgs // 64
             args['maxframes'] = 64   

@@ -116,11 +116,12 @@ class Network(nn.Module):
                 output_device=cfg.primary_gpus[0])
 
         # pose decoder MLP
-        self.pose_decoder = \
-            load_pose_decoder(cfg.pose_decoder.module)(
-                embedding_size=cfg.pose_decoder.embedding_size,
-                mlp_width=cfg.pose_decoder.mlp_width,
-                mlp_depth=cfg.pose_decoder.mlp_depth)
+        if cfg.pose_decoder_off == False:
+            self.pose_decoder = \
+                load_pose_decoder(cfg.pose_decoder.module)(
+                    embedding_size=cfg.pose_decoder.embedding_size,
+                    mlp_width=cfg.pose_decoder.mlp_width,
+                    mlp_depth=cfg.pose_decoder.mlp_depth)
         
         if cfg.non_rigid_motion_mlp.time_input and not cfg.ignore_non_rigid_motions:
             if cfg.non_rigid_motion_mlp.time_embed == 'sine':

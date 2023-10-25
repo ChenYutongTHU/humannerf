@@ -101,7 +101,6 @@ class NonRigidMotionMLP(nn.Module):
                 else:
                     trans = self.multihead_mlp(trans, head_id=head_id)
         
-
         if multi_outputs==True:
             result = {
                 'xyz': [pos_xyz + t for t in trans],

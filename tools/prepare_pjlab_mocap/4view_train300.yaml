@@ -1,0 +1,12 @@
+dataset:
+  zju_mocap_path: /mnt/data/Gvlab/chenyutong/code/humannerf/data/pjlab_mocap
+  sex: 'neutral'
+
+training_view: [0,2,3,5]
+max_frames: -1
+train_split_file: './nb_train.txt' #
+
+output:
+  dir: ../../dataset/pjlab_mocap
+  name: 'pjlab_4view_train300'
+

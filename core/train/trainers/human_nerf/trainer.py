@@ -230,7 +230,7 @@ class Trainer(object):
 
             is_reload_model = False
             if ((self.iter in [self.start_iter, 100, 300, 1000, 2500]) or \
-                self.iter % cfg.progress.dump_interval == 0) and self.iter!=1:
+                self.iter % cfg.progress.dump_interval == 0):
                 is_reload_model = self.progress() #if is_empty_Image keep_iter=1
                 is_reload_model = False #do not reproduce image
 
@@ -289,7 +289,7 @@ class Trainer(object):
                 rgbs = [rgb.data.to("cpu").numpy() for rgb in net_output['rgb']]
             else:
                 rgbs = [net_output['rgb'].data.to("cpu").numpy()]
-            
+
             for head_id, rgb in enumerate(rgbs):
                 target_rgbs = batch['target_rgbs']
                 rendered = np.full(

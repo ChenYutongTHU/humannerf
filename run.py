@@ -235,6 +235,7 @@ def run_movement(render_folder_name='movement'):
             break
         for k, v in batch.items():
             batch[k] = v[0]
+
         data = cpu_data_to_gpu(
                     batch,
                     exclude_keys=EXCLUDE_KEYS_TO_GPU + ['target_rgbs'])

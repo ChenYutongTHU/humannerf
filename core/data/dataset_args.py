@@ -3,11 +3,35 @@ from configs import cfg
 class DatasetArgs(object):
     dataset_attrs = {}
 
-    subjects = ['313', '315', '377', '386', '387', '390', '392', '393', '394']
+    subjects = ['313', '315', '377', '386', '387', '390', '392', '393', '394','xiao']
 
     if cfg.category == 'human_nerf' and cfg.task == 'zju_mocap':
         for sub in subjects:
             dataset_attrs.update({
+                f"pjlab_{sub}_view14_after-800_step4":{ #for novel pose
+                    "dataset_path": f"dataset/pjlab/{sub}/view14_after-800_step4",
+                    "keyfilter": cfg.test_keyfilter,
+                    "ray_shoot_mode": 'image',
+                    "subject": sub,                    
+                },
+                f"pjlab_{sub}_view14_500-800_step5":{ #for novel view
+                    "dataset_path": f"dataset/pjlab/{sub}/view14_500-800_step5",
+                    "keyfilter": cfg.test_keyfilter,
+                    "ray_shoot_mode": 'image',
+                    "subject": sub,                    
+                },
+                f"pjlab_{sub}_view0235_500-800":{
+                    "dataset_path": f"dataset/pjlab/{sub}/view0235_500-800",
+                    "keyfilter": cfg.train_keyfilter,
+                    "ray_shoot_mode": cfg.train.ray_shoot_mode,
+                    "subject": sub,                    
+                },
+                f"pjlab_{sub}_train-all_view00":{
+                    "dataset_path": f"dataset/pjlab/{sub}/00",
+                    "keyfilter": cfg.train_keyfilter,
+                    "ray_shoot_mode": cfg.train.ray_shoot_mode,
+                    "subject": sub,                    
+                },
                 f"zju_{sub}_test_fr-tv_vw-novel-all":{
                     "source_path": f"data/zju/CoreView_{sub}",
                     "dataset_path": f"dataset/zju_mocap/{sub}_fr-tv_vw-novel-all",
