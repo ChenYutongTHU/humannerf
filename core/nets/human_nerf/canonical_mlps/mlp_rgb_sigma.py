@@ -134,7 +134,7 @@ class CanonicalMLP(nn.Module):
                 condition_code_ = condition_code_.expand((pos_embed.shape[0],)+condition_code_.shape[1:])
                 if cfg.condition_code.type == 'local':
                     assert cfg.canonical_mlp.condition_code_encoder.lower() == 'none'
-                    condition_code_ = localize_condition_code(condition_code_, weights)
+                condition_code_ = localize_condition_code(condition_code_, weights) #!!!
                 h += [condition_code_]
             if self.time_input:
                 h += [time_vec_cnl.expand((pos_embed.shape[0],)+time_vec_cnl.shape[1:])]
@@ -184,5 +184,6 @@ class CanonicalMLP(nn.Module):
             ao = self.output_linear_ao_2(torch.cat([feature, pose_latent], axis=1))
             ao = self.ao_activation(ao)
             outputs = torch.cat([rgb*ao, density],dim=1) #N, 4
+
         return outputs    
         

@@ -15,8 +15,8 @@ def mask_condition_code(condition_code, mask):
     return condition_code
 
 def localize_condition_code(condition_code, weights):
-    if condition_code.shape[0]!=weights.shape[0]:
-        condition_code = condition_code.expand((weights.shape[0],-1,-1))
+    # if condition_code.shape[0]!=weights.shape[0]:
+    #     condition_code = condition_code.expand((weights.shape[0],-1,-1))
     if cfg.condition_code.type == 'global':
         pass
     elif cfg.condition_code.type == 'local':

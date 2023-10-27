@@ -235,7 +235,7 @@ class Trainer(object):
                 is_reload_model = False #do not reproduce image
 
             if not is_reload_model:
-                if self.iter % cfg.train.save_checkpt_interval == 0:
+                if self.iter % cfg.train.save_checkpt_interval == 0 or self.iter==self.start_iter:
                     self.save_ckpt('latest')
 
                 if cfg.save_all:

@@ -8,7 +8,7 @@ from configs import cfg
 class MlpSeq(nn.Module):
     def __init__(self, input_dim, seq_len, hidden_dim, output_dim, non_linear, depth=1, **kwargs):
         super(MlpSeq, self).__init__()
-        self.output_dim = output_dim
+        self.output_dim = output_dim if output_dim!=0 else hidden_dim
         module_list = []
         for i in range(depth):
             if i==0:
@@ -17,7 +17,8 @@ class MlpSeq(nn.Module):
                 module_list.append(nn.Linear(hidden_dim, hidden_dim))
             if non_linear:
                 module_list.append(nn.ReLU())
-        module_list.append(nn.Linear(hidden_dim, output_dim))
+        if output_dim>0:
+            module_list.append(nn.Linear(hidden_dim, output_dim))
         self.mlp = nn.Sequential(*module_list)
 
     def forward(self, input_seq):
