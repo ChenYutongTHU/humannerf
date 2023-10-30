@@ -6,7 +6,7 @@ if cfg.condition_code.local.part2joints_file != 'empty':
 
 
 def mask_condition_code(condition_code, mask):
-    #condition_code (P,D*23); mask[P,23]
+    #condition_code (P,23*D); mask[P,23]
     dim_per_bone = condition_code.shape[1]//23
     mask = torch.tile(mask[...,None], [1,1,dim_per_bone]) #P,23,dim_per_bone
     mask = mask.reshape(mask.shape[0],-1) #P,23*dim_per_bone

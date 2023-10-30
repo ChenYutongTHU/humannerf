@@ -6,6 +6,7 @@ from core.nets.human_nerf.multihead import MultiheadMlp
 from core.nets.human_nerf.selfattention import SelfAttention, MlpSeq
 from core.nets.human_nerf.localize import localize_condition_code
 from core.nets.human_nerf.canonical_mlps.input_encoder import InputEncoder 
+from core.nets.human_nerf.canonical_mlps.input_encoder_v2 import InputEncoder_v2
 from configs import cfg 
 
 class CanonicalMLP(nn.Module):
@@ -32,7 +33,8 @@ class CanonicalMLP(nn.Module):
         self.input_encoder_enable = cfg.canonical_mlp.input_encoder.enable
         self.condition_code_dim = cfg.canonical_mlp.condition_code_dim
         if self.input_encoder_enable:
-            self.input_encoder = InputEncoder(
+            input_encoder_module = InputEncoder if cfg.canonical_mlp.input_encoder.version=='v1' else InputEncoder_v2
+            self.input_encoder = input_encoder_module(
                 input_ch=input_ch, condition_code_dim=self.condition_code_dim,
                 **cfg.canonical_mlp.input_encoder)
             input_ch_ = self.input_encoder.output_dim
@@ -57,6 +59,7 @@ class CanonicalMLP(nn.Module):
             time_ch = cfg.canonical_mlp.time_dim
         else:
             time_ch = 0
+        self.input_ch = input_ch_+time_ch
         pts_block_mlps = [nn.Linear(input_ch_+time_ch, mlp_width), nn.ReLU()]
         layers_to_cat_input = []
         for i in range(mlp_depth+mlp_depth_plus-1):
@@ -125,22 +128,31 @@ class CanonicalMLP(nn.Module):
                 nn.Linear(mlp_width, 1)) #output a scalar
             self.ao_activation = torch.nn.Sigmoid()
 
-    def forward(self, pos_embed, dir_embed=None, condition_code=None, head_id=None, pose_latent=None, time_vec_cnl=None, weights=None, **_):
-        if self.input_encoder_enable==False:
-            h = [pos_embed]
-            if self.condition_code_dim>0:
-                assert condition_code is not None
-                condition_code_ = self.condition_code_encoder(condition_code)
-                condition_code_ = condition_code_.expand((pos_embed.shape[0],)+condition_code_.shape[1:])
-                if cfg.condition_code.type == 'local':
-                    assert cfg.canonical_mlp.condition_code_encoder.lower() == 'none'
-                condition_code_ = localize_condition_code(condition_code_, weights) #!!!
-                h += [condition_code_]
-            if self.time_input:
-                h += [time_vec_cnl.expand((pos_embed.shape[0],)+time_vec_cnl.shape[1:])]
+    def forward(self, pos_embed, dir_embed=None, condition_code=None, head_id=None, pose_latent=None, time_vec_cnl=None, weights=None, iter_val=1e7, **_):
+        if cfg.canonical_mlp.condition_code_delay and iter_val < cfg.canonical_mlp.kick_in_iter:
+            h = [pos_embed, torch.zeros_like((pos_embed.shape[0], self.input_ch-pos_embed.shape[1]))]
+            import ipdb; ipdb.set_trace()
             h = torch.cat(h, dim=1)
         else:
-            h = self.input_encoder(pos_embed, condition_code, weights=weights)
+            if cfg.canonical_mlp.condition_code_delay and iter_val < cfg.canonical_mlp.full_band_iter:
+                gate_weight = (iter_val-cfg.canonical_mlp.kick_in_iter)/(cfg.canonical_mlp.full_band_iter-cfg.canonical_mlp.kick_in_iter)
+            else:
+                gate_weight = 1
+            if self.input_encoder_enable==False:
+                h = [pos_embed]
+                if self.condition_code_dim>0:
+                    assert condition_code is not None
+                    condition_code_ = self.condition_code_encoder(condition_code)
+                    condition_code_ = condition_code_.expand((pos_embed.shape[0],)+condition_code_.shape[1:])
+                    if cfg.condition_code.type == 'local':
+                        assert cfg.canonical_mlp.condition_code_encoder.lower() == 'none'
+                    condition_code_ = localize_condition_code(condition_code_, weights) #!!!
+                    h += [condition_code_*gate_weight]
+                if self.time_input:
+                    h += [time_vec_cnl.expand((pos_embed.shape[0],)+time_vec_cnl.shape[1:])]
+                h = torch.cat(h, dim=1)
+            else:
+                h = self.input_encoder(pos_embed, condition_code, weights=weights, gate_weight=gate_weight)
 
         for i, _ in enumerate(self.pts_linears):
             if i in self.layers_to_cat_input:

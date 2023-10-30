@@ -162,7 +162,7 @@ class Network(nn.Module):
             non_rigid_mlp_input,
             dir_xyz, dir_idx, 
             dir_embed_fn, 
-            head_id, pose_latent, backward_motion_weights):
+            head_id, pose_latent, backward_motion_weights, iter_val):
 
         # (N_rays, N_samples, 3) --> (N_rays x N_samples, 3)
         pos_flat = torch.reshape(pos_xyz, [-1, pos_xyz.shape[-1]])
@@ -180,7 +180,7 @@ class Network(nn.Module):
                         non_rigid_pos_embed_fn=non_rigid_pos_embed_fn,
                         dir_flat=dir_flat, 
                         dir_embed_fn=dir_embed_fn,
-                        chunk=chunk, head_id=head_id, pose_latent=pose_latent, weights_flat=weights_flat)
+                        chunk=chunk, head_id=head_id, pose_latent=pose_latent, weights_flat=weights_flat, iter_val=iter_val)
 
         output = {}
 
@@ -224,7 +224,7 @@ class Network(nn.Module):
             non_rigid_pos_embed_fn,
             dir_flat, 
             dir_embed_fn,
-            chunk, head_id, pose_latent, weights_flat):
+            chunk, head_id, pose_latent, weights_flat, iter_val):
 
         if cfg.canonical_mlp.multihead.enable and head_id==-1:
             raws_list = [[] for i in range(cfg.multihead.head_num)]
@@ -277,12 +277,12 @@ class Network(nn.Module):
                                     head_id=new_head_id_expanded,
                                     condition_code_cmlp=self._expand_input(non_rigid_mlp_input['condition_code_cmlp'], len(cfg.secondary_gpus)) if 'condition_code_cmlp' in non_rigid_mlp_input else None,
                                     time_vec_cnl=self._expand_input(non_rigid_mlp_input['time_vec_cnl'], len(cfg.secondary_gpus)) if 'time_vec_cnl' in non_rigid_mlp_input else None,
-                                    weights=weights)]  #N*num_head, 4                     
+                                    weights=weights,iter_val=iter_val)]  #N*num_head, 4                     
                 else:
                     xyz_embedded = pos_embed_fn(xyz) #B*n_head (if argmin), 3*2*10 
                     raws_list_ = self.cnl_mlp(
                                 pos_embed=xyz_embedded, dir_embed=dir_embed, 
-                                head_id=head_id_expanded) #N*num_head, 4  
+                                head_id=head_id_expanded, iter_val=iter_val) #N*num_head, 4  
                     for head_id_, o in enumerate(raws_list_):
                         raws_list[head_id_].append(o)     
                         xyz_list[head_id_].append(xyz)                      
@@ -296,7 +296,7 @@ class Network(nn.Module):
                             head_id=head_id_expanded,
                             condition_code=self._expand_input(non_rigid_mlp_input['condition_code_cmlp'], len(cfg.secondary_gpus)) if 'condition_code_cmlp' in non_rigid_mlp_input else None,
                             time_vec_cnl=self._expand_input(non_rigid_mlp_input['time_vec_cnl'], len(cfg.secondary_gpus)) if 'time_vec_cnl' in non_rigid_mlp_input else None,
-                            weights=weights)] #N*num_head, 4
+                            weights=weights,iter_val=iter_val)] #N*num_head, 4
         
         if cfg.canonical_mlp.multihead.enable  and head_id.min()==-1:
             raws_list = [torch.cat(raws, dim=0).to(cfg.primary_gpus[0]) for raws in raws_list] 
@@ -468,7 +468,7 @@ class Network(nn.Module):
             dir_embed_fn,
             non_rigid_mlp_input=None,
             bgcolor=None, head_id=None,
-            pose_latent=None, dir_idx=None, 
+            pose_latent=None, dir_idx=None, iter_val=1e7,
             **_):
         
         N_rays = ray_batch.shape[0]
@@ -509,7 +509,8 @@ class Network(nn.Module):
                                 non_rigid_pos_embed_fn=non_rigid_pos_embed_fn,
                                 dir_embed_fn=dir_embed_fn,
                                 dir_xyz=dir_xyz, dir_idx=dir_idx, 
-                                head_id=head_id, pose_latent=pose_latent, backward_motion_weights=backward_motion_weights)
+                                head_id=head_id, pose_latent=pose_latent, backward_motion_weights=backward_motion_weights,
+                                iter_val=iter_val)
         raw = query_result['raws']
         xyz = query_result['xyzs']
         

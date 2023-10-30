@@ -54,6 +54,9 @@ canonical_mlp:
   last_linear_scale: 1
   condition_code_dim: 0
   condition_code_encoder: none  #or input_encoder
+  condition_code_delay: False
+  kick_in_iter: 10000
+  full_band_iter: 50000 
   mlpseq:
     hidden_dim: 128
     output_dim: 64
@@ -71,6 +74,7 @@ canonical_mlp:
   #***************************************
   input_encoder:
     enable: False
+    version: v1
     seq_len: 8
     temporal_enc_method: selfattention #or mlp or fourier? or empty
     temporal_enc_cfg_selfattention:
