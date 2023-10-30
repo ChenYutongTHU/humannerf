@@ -78,7 +78,8 @@ class InputEncoder(nn.Module):
             self.spatial_encoder = MlpSeq(
                 input_dim=temporal_dim, seq_len=N_JOINT, **spatial_enc_cfg_mlp
             )
-            self.spatial_encode = lambda tc: self.spatial_encoder(tc.reshape((tc.shape[0],-1))) #B,23,D ->B,23*D
+            #self.spatial_encode = lambda tc: self.spatial_encoder(tc.reshape((tc.shape[0],-1))) #B,23,D ->B,23*D
+            self.spatial_encode = lambda tc: self.spatial_encoder(tc) #B,23,D ->B,23*D
             spatial_dim = self.spatial_encoder.output_dim
         elif spatial_enc_method == 'empty':
             self.spatial_encode = lambda tc: tc.reshape((tc.shape[0],-1)) #B,23,T*D -> B,23*T*D
