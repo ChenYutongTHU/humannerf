@@ -34,6 +34,10 @@ condition_code:
     fg_threshold: 0.2
     threshold: -1. # -1 stands for x directly. [0,1] stands for a threhold for binarization
 
+rgb_history:
+  last_num: 0 #0
+  step: 1
+
 
 # canonical mlp
 canonical_mlp:

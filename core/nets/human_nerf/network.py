@@ -469,11 +469,12 @@ class Network(nn.Module):
             non_rigid_mlp_input=None,
             bgcolor=None, head_id=None,
             pose_latent=None, dir_idx=None, iter_val=1e7,
+            dst_Rs_history=None, dst_Ts_history=None, 
             **_):
         
         N_rays = ray_batch.shape[0]
         rays_o, rays_d, rays_d_camera, near, far = self._unpack_ray_batch(ray_batch)
-
+        self.cnl_bbox_scale_xyz, self.cnl_bbox_min_xyz = cnl_bbox_scale_xyz, cnl_bbox_min_xyz
         z_vals = self._get_samples_along_ray(N_rays, near, far)
         if cfg.perturb > 0.:
             z_vals = self._stratified_sampling(z_vals)
@@ -502,6 +503,10 @@ class Network(nn.Module):
         pts_mask = mv_output['fg_likelihood_mask']
         cnl_pts = mv_output['x_skel']
         backward_motion_weights = mv_output['backward_motion_weights']
+
+        # import ipdb; ipdb.set_trace()
+        # res = self.correspondence_forward_searching(cnl_pts, dst_Rs_history, dst_Ts_history)
+
         query_result = self._query_mlp(
                                 pos_xyz=cnl_pts, 
                                 non_rigid_mlp_input=non_rigid_mlp_input,
@@ -537,6 +542,7 @@ class Network(nn.Module):
             rgb_map, acc_map, weights, depth_map, cnl_xyz, cnl_rgb, cnl_weight, rgb_on_rays = \
                 self._raw2outputs(raw, pts_mask, z_vals, rays_d, xyz, bgcolor) #[N_rays, 3]
             #multi_outputs = False
+        #DEBUG
 
         return {'rgb' : rgb_map,  
                 'alpha' : acc_map, 
@@ -561,6 +567,21 @@ class Network(nn.Module):
         return torch.matmul(Rs.reshape(-1, 3, 3),
                             correct_Rs.reshape(-1, 3, 3)).reshape(-1, total_bones, 3, 3)
 
+    def correspondence_forward_searching(self, cnl_pts, dst_Rs, dst_Ts):
+        motion_scale_Rs, motion_Ts = self._get_motion_base(
+                                            dst_Rs=dst_Rs, 
+                                            dst_Ts=dst_Ts, 
+                                            cnl_gtfms=self.cnl_gtfms)
+        mv_output = self._sample_motion_fields(
+                            pts=cnl_pts,
+                            motion_scale_Rs=motion_scale_Rs[0], 
+                            motion_Ts=motion_Ts[0], 
+                            motion_weights_vol=self.motion_weights_vol,
+                            cnl_bbox_min_xyz=self.cnl_bbox_min_xyz, 
+                            cnl_bbox_scale_xyz=self.cnl_bbox_scale_xyz,
+                            output_list=['x_skel', 'fg_likelihood_mask', 'backward_motion_weights'])
+        import ipdb; ipdb.set_trace() #fg_likelihood_mask
+        return mv_output
     
     def forward(self,
                 rays, 
@@ -571,15 +592,22 @@ class Network(nn.Module):
                 iter_val=1e7,
                 pose_condition=None,  pose_condition_cmlp=None,
                 frame_id=None, 
+                dst_posevec_history=None,
+                dst_Rs_history=None, dst_Ts_history=None,
                 **kwargs):
         dst_Rs=dst_Rs[None, ...]
         dst_Ts=dst_Ts[None, ...]
         dst_posevec=dst_posevec[None, ...]
         cnl_gtfms=cnl_gtfms[None, ...]
+        self.cnl_gtfms = cnl_gtfms
         motion_weights_priors=motion_weights_priors[None, ...]
 
         # correct body pose
         if iter_val >= cfg.pose_decoder.get('kick_in_iter', 0) and cfg.pose_decoder_off==False:
+            if dst_Rs_history is not None:
+                dst_posevec = torch.cat([dst_posevec, dst_posevec_history], dim=0)
+                dst_Rs =  torch.cat([dst_Rs, dst_Rs_history], dim=0)
+                dst_Ts =  torch.cat([dst_Ts, dst_Ts_history], dim=0)
             pose_out = self.pose_decoder(dst_posevec)
             refined_Rs = pose_out['Rs']
             refined_rvec = pose_out['rvec']
@@ -590,6 +618,7 @@ class Network(nn.Module):
             #     'delta_r': refined_rvec.cpu().numpy(), 
             #     'R0': dst_Rs_no_root.cpu().numpy(),
             #     'r0': dst_posevec.cpu().numpy()}
+            dst_Rs_no_root = dst_Rs_no_root.expand((refined_Rs.shape[0],-1,-1,-1))
             dst_Rs_no_root = self._multiply_corrected_Rs(
                                         dst_Rs_no_root, 
                                         refined_Rs)
@@ -599,7 +628,10 @@ class Network(nn.Module):
 
             if refined_Ts is not None:
                 dst_Ts = dst_Ts + refined_Ts
-
+            
+            if dst_Rs_history is not None:
+                kwargs.update({'dst_Rs_history':dst_Rs[1:], 'dst_Ts_history':dst_Ts[1:],})
+            dst_Rs, dst_Ts = dst_Rs[0:1], dst_Ts[0:1]
 
         non_rigid_pos_embed_fn, _ = \
             self.get_non_rigid_embedder(
@@ -667,12 +699,12 @@ class Network(nn.Module):
                                             cnl_gtfms=cnl_gtfms)
         motion_weights_vol = self.mweight_vol_decoder(
             motion_weights_priors=motion_weights_priors)
-        motion_weights_vol=motion_weights_vol[0] # remove batch dimension
+        self.motion_weights_vol=motion_weights_vol[0] # remove batch dimension
 
         kwargs.update({
             'motion_scale_Rs': motion_scale_Rs,
             'motion_Ts': motion_Ts,
-            'motion_weights_vol': motion_weights_vol
+            'motion_weights_vol': self.motion_weights_vol
         })
 
         rays_o, rays_d, rays_d_camera = rays

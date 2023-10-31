@@ -59,7 +59,10 @@ class Dataset(torch.utils.data.Dataset):
         self.mesh_infos = self.load_train_mesh_infos()
 
         framelist = self.load_train_frames()
+        self.framelist_all = framelist
+        self.skip = skip
         self.framelist = framelist[::skip]
+
         if maxframes > 0:
             self.framelist = self.framelist[:maxframes]
         print(f' -- Total Frames: {self.get_total_frames()}')
@@ -649,6 +652,24 @@ class Dataset(torch.utils.data.Dataset):
                 'cnl_gtfms': cnl_gtfms
             })
 
+            if cfg.rgb_history.last_num > 0:
+                dst_Rs_history, dst_Ts_history, dst_posevec_last = [], [], []
+                for i in np.arange(1,cfg.rgb_history.last_num+1)*cfg.rgb_history.step:
+                    frame_name_last = self.framelist_all[idx*self.skip-i] if idx*self.skip-i>=0 else self.framelist_all[0]
+                    dst_skel_info_last = self.query_dst_skeleton(frame_name_last)
+                    dst_poses_last, dst_tpose_joints_last = dst_skel_info_last['poses'], dst_skel_info_last['dst_tpose_joints']
+                    dst_Rs_last, dst_Ts_last = body_pose_to_body_RTs(
+                            dst_poses_last, dst_tpose_joints_last
+                        )
+                    dst_Rs_history.append(dst_Rs_last)
+                    dst_Ts_history.append(dst_Ts_last)
+                    dst_posevec_last.append(dst_poses_last[3:] + 1e-2)
+                results.update({
+                    'dst_Rs_history': np.stack(dst_Rs_history, axis=0),
+                    'dst_Ts_history': np.stack(dst_Ts_history, axis=0),
+                    'dst_posevec_history': np.stack(dst_posevec_last, axis=0)
+                })
+
         if 'motion_weights_priors' in self.keyfilter:
             results['motion_weights_priors'] = self.motion_weights_priors.copy()
 
@@ -670,6 +691,7 @@ class Dataset(torch.utils.data.Dataset):
             results.update({
                 'dst_posevec': dst_posevec_69,
             })
+
         if self.pose_condition_list is not None:
             results['pose_condition'] = self.pose_condition_list[idx]
             if cfg.pose_condition_random_mask != 'empty' and self.ray_shoot_mode=='patch': #during training

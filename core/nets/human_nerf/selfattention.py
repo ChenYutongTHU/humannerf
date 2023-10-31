@@ -23,7 +23,8 @@ class MlpSeq(nn.Module):
 
     def forward(self, input_seq):
         #B,T,D
-        input_seq = input_seq.reshape([input_seq.shape[0],-1])
+        #input_seq = input_seq.reshape([input_seq.shape[0],-1])
+        input_seq = input_seq.reshape(input_seq.shape[:-2]+(input_seq.shape[-1]*input_seq.shape[-2],))
         return self.mlp(input_seq)
 
 class SelfAttention(nn.Module):
