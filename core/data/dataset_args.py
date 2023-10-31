@@ -91,12 +91,14 @@ class DatasetArgs(object):
                     "subject": sub,
                 },
                 f"zju_{sub}_nb_1view_test": {
-                    "dataset_path": f"dataset/zju_mocap/{sub}_nb_1view_train",
+                    "dataset_path": f"dataset/zju_mocap/{sub}_nb_4view_train",
                     "source_path": f"data/zju/CoreView_{sub}",
                     "keyfilter": cfg.test_keyfilter,
                     "ray_shoot_mode": 'image',
                     "src_type": 'zju_mocap',
                     "subject": sub,
+                    "select_views":[1],
+                    "skip":4,
                 },
                 f"zju_{sub}_nb_4view_novelpose": {
                     "dataset_path": f"dataset/zju_mocap/{sub}_nb_4view_novelpose",

@@ -1,5 +1,5 @@
 import numpy as np
-import cv2
+import cv2, torch
 
 def _update_extrinsics(
         extrinsics, 
@@ -206,3 +206,22 @@ def rays_intersect_3d_bbox(bounds, ray_o, ray_d):
     far = np.maximum(d0, d1)
 
     return near, far, mask_at_box
+
+def project_world2image(xyzs, w2cs):
+    r""" 
+
+    Args:
+        - xyzs: Array (N_ray, 128, ?, 3)
+        - w2cs: Array (?, V_num, 4, 3)
+        
+    Returns:
+        - Array (N_ray, 128, ?, V_num, 2) int32
+    """
+    orig_shape = list(xyzs.shape)
+    xyzs = xyzs.reshape([-1]+orig_shape[2:]) #(N_ray-128, ? ,3)
+    xyzs = torch.cat([xyzs, torch.ones_like(xyzs[...,-1:])], axis=-1) #(N_ray-128, ?, 4)
+    #((1)x,?y, V_num-z, 4-i, 3-j) @ (N_ray-128-x, ?-y, (1)-z, 4) -> (N_ray-128-x, ?-y, V_num-z, 3)
+    uvzs = torch.einsum('xyzij,xyzj->xyzi', w2cs[None,...], xyzs[:,:,None,:])  #(N_ray-128,?, V_num,3)
+    uvzs = uvzs[...,:2]/(uvzs[...,-1:]+1e-10) #(N_ray-128-?,V_num,2)
+    uvzs = uvzs.reshape(list(orig_shape[:-1])+list(uvzs.shape[-2:])) #(N_ray, 128, ?, V_num, 2)
+    return uvzs.int()

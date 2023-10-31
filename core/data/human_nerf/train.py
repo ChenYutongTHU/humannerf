@@ -33,6 +33,7 @@ class Dataset(torch.utils.data.Dataset):
             ray_shoot_mode='image',
             skip=1,
             pose_condition_file=None,pose_condition_file_cmlp=None,
+            select_views='all',
             **_):
 
         print('[Dataset Path] ', dataset_path, '[Source Path] ', source_path) 
@@ -60,6 +61,9 @@ class Dataset(torch.utils.data.Dataset):
 
         framelist = self.load_train_frames()
         self.framelist_all = framelist
+        self.views_all = set([self.get_frame_camera(f)[1] for f in framelist])
+        if select_views != 'all':
+            framelist = [f for f in framelist if self.get_frame_camera(f)[1] in select_views]
         self.skip = skip
         self.framelist = framelist[::skip]
 
@@ -156,6 +160,14 @@ class Dataset(torch.utils.data.Dataset):
             frame_int = int(name)
             camera_int  =0
         return frame_int, camera_int
+    
+    def get_framename(self, frame_int, camera_int):
+        #'Camera_B13/000299.jpg'
+        name1 = f'Camera_B{camera_int}/{frame_int:06d}.jpg'
+        if name1 not in self.framelist_all:
+            raise ValueError
+        return name1
+        #name2 = 
 
     def load_train_frames(self):
         if self.source_path is None:
@@ -652,22 +664,48 @@ class Dataset(torch.utils.data.Dataset):
                 'cnl_gtfms': cnl_gtfms
             })
 
-            if cfg.rgb_history.last_num > 0:
+            if cfg.rgb_history.last_num > 0: #only support consecutive frames
+                frame_id, camera_id = self.get_frame_camera(frame_name)
                 dst_Rs_history, dst_Ts_history, dst_posevec_last = [], [], []
+                w2c_history = []
+                frame_name_history = []
                 for i in np.arange(1,cfg.rgb_history.last_num+1)*cfg.rgb_history.step:
-                    frame_name_last = self.framelist_all[idx*self.skip-i] if idx*self.skip-i>=0 else self.framelist_all[0]
+                    frame_id_last = max(frame_id - i,0)
+                    frame_name_last = self.get_framename(frame_id_last, camera_id)
+                    #frame_name_last = self.framelist_all[idx*self.skip-i] if idx*self.skip-i>=0 else self.framelist_all[0]
                     dst_skel_info_last = self.query_dst_skeleton(frame_name_last)
                     dst_poses_last, dst_tpose_joints_last = dst_skel_info_last['poses'], dst_skel_info_last['dst_tpose_joints']
                     dst_Rs_last, dst_Ts_last = body_pose_to_body_RTs(
                             dst_poses_last, dst_tpose_joints_last
                         )
+
                     dst_Rs_history.append(dst_Rs_last)
                     dst_Ts_history.append(dst_Ts_last)
                     dst_posevec_last.append(dst_poses_last[3:] + 1e-2)
+                    
+                    #multiple camera
+                    multiview_w2c = []
+                    frame_name_history_multiview = []
+                    for cid in self.views_all:
+                        frame_name_last = self.get_framename(frame_id_last, cid)
+                        frame_name_history_multiview.append(frame_name_last)
+                        K_last = self.cameras[frame_name_last]['intrinsics'][:3, :3].copy()
+                        K_last[:2] *= cfg.resize_img_scale
+                        E_last = self.cameras[frame_name_last]['extrinsics']
+                        E_last = apply_global_tfm_to_camera(
+                                E=E_last, 
+                                Rh=dst_skel_info_last['Rh'],
+                                Th=dst_skel_info_last['Th'])
+                        multiview_w2c.append(K_last@E_last[:3,:].astype(np.float32))
+                    w2c_history.append(np.stack(multiview_w2c, axis=0)) #(num_View, 3,4)
+                    frame_name_history.append(frame_name_history_multiview)
+
                 results.update({
                     'dst_Rs_history': np.stack(dst_Rs_history, axis=0),
                     'dst_Ts_history': np.stack(dst_Ts_history, axis=0),
-                    'dst_posevec_history': np.stack(dst_posevec_last, axis=0)
+                    'dst_posevec_history': np.stack(dst_posevec_last, axis=0),
+                    'w2c_history': np.stack(w2c_history, axis=0), #(N,num_view,3,4)
+                    'frame_name_history': frame_name_history,
                 })
 
         if 'motion_weights_priors' in self.keyfilter:

@@ -12,6 +12,7 @@ from core.nets.human_nerf.component_factory import \
     load_non_rigid_motion_mlp, \
     load_non_rigid_motion_transformer_encoder, \
     load_vocab_embedder
+from core.utils.camera_util import project_world2image
 
 from configs import cfg
 
@@ -470,6 +471,7 @@ class Network(nn.Module):
             bgcolor=None, head_id=None,
             pose_latent=None, dir_idx=None, iter_val=1e7,
             dst_Rs_history=None, dst_Ts_history=None, 
+            w2c_history=None,
             **_):
         
         N_rays = ray_batch.shape[0]
@@ -504,8 +506,17 @@ class Network(nn.Module):
         cnl_pts = mv_output['x_skel']
         backward_motion_weights = mv_output['backward_motion_weights']
 
-        # import ipdb; ipdb.set_trace()
-        # res = self.correspondence_forward_searching(cnl_pts, dst_Rs_history, dst_Ts_history)
+        outputs = {}
+        if w2c_history is not None:
+            with torch.no_grad():
+                x_pose = self.correspondence_forward_searching(cnl_pts, 
+                        forward_motion_weights=backward_motion_weights,
+                        dst_Rs=dst_Rs_history, dst_Ts=dst_Ts_history)
+                uvs = project_world2image(x_pose, w2c_history) #(N_ray, 128, ?, View_num, 2)
+                outputs['correspondence_uv'] = uvs
+                
+        #project to RGB given camera_view K E
+        ######
 
         query_result = self._query_mlp(
                                 pos_xyz=cnl_pts, 
@@ -544,14 +555,15 @@ class Network(nn.Module):
             #multi_outputs = False
         #DEBUG
 
-        return {'rgb' : rgb_map,  
+        outputs.update({'rgb' : rgb_map,  
                 'alpha' : acc_map, 
                 'depth': depth_map,
                 'weights_on_rays': weights,
                 'xyz_on_rays': xyz, 'rgb_on_rays': rgb_on_rays, 
                 'cnl_xyz':cnl_xyz, 'cnl_rgb':cnl_rgb, 'cnl_weight':cnl_weight,
                 'backward_motion_weights': backward_motion_weights, #unnormalized
-                'offsets': query_result['offsets']}#, multi_outputs
+                'offsets': query_result['offsets']})#, multi_outputs
+        return outputs
 
 
     def _get_motion_base(self, dst_Rs, dst_Ts, cnl_gtfms):
@@ -567,21 +579,34 @@ class Network(nn.Module):
         return torch.matmul(Rs.reshape(-1, 3, 3),
                             correct_Rs.reshape(-1, 3, 3)).reshape(-1, total_bones, 3, 3)
 
-    def correspondence_forward_searching(self, cnl_pts, dst_Rs, dst_Ts):
+    def correspondence_forward_searching(self, pts, forward_motion_weights, dst_Rs, dst_Ts):
+        orig_shape = list(pts.shape)
+        pts = pts.reshape(-1, 3) # [N_rays x N_samples, 3]
+        forward_motion_weights = forward_motion_weights.reshape(-1, forward_motion_weights.shape[-1])
         motion_scale_Rs, motion_Ts = self._get_motion_base(
                                             dst_Rs=dst_Rs, 
                                             dst_Ts=dst_Ts, 
-                                            cnl_gtfms=self.cnl_gtfms)
-        mv_output = self._sample_motion_fields(
-                            pts=cnl_pts,
-                            motion_scale_Rs=motion_scale_Rs[0], 
-                            motion_Ts=motion_Ts[0], 
-                            motion_weights_vol=self.motion_weights_vol,
-                            cnl_bbox_min_xyz=self.cnl_bbox_min_xyz, 
-                            cnl_bbox_scale_xyz=self.cnl_bbox_scale_xyz,
-                            output_list=['x_skel', 'fg_likelihood_mask', 'backward_motion_weights'])
-        import ipdb; ipdb.set_trace() #fg_likelihood_mask
-        return mv_output
+                                            cnl_gtfms=self.cnl_gtfms.expand((dst_Rs.shape[0],-1,-1,-1)).contiguous()) #[N,24,3,3]
+        motion_scale_Rs_forward = motion_scale_Rs.transpose(2,3)
+        motion_Ts_forward = -1*torch.einsum('bnij,bnj->bni', motion_scale_Rs_forward, motion_Ts) #(B,N,3)
+        total_bases = forward_motion_weights.shape[-1]
+        forward_motion_weights_sum = torch.sum(forward_motion_weights, 
+                                                dim=-1, keepdim=True) #(B,1)
+        weighted_motion_fields = []
+        for i in range(total_bases):
+            #pos = torch.matmul(motion_scale_Rs[i, :, :], pts.T).T + motion_Ts[i, :]
+            #pos = torch.matmul(motion_scale_Rs[i, :, :].T, pts.T).T  - torch.matmul(motion_scale_Rs[i, :, :].T,motion_Ts[i, :].T).T #inverse (B,3)
+            pos = torch.einsum('nij,bj->bni', motion_scale_Rs_forward[:,i], pts)+motion_Ts_forward[:,i]  #N,3,3, (b,3)-> (b,N,i)
+            weighted_pos = forward_motion_weights[:,None,i:i+1] * pos #(b,1,1) (b,N,3)->(b,N,3)
+            weighted_motion_fields.append(weighted_pos)
+        x_skel = torch.sum(
+                        torch.stack(weighted_motion_fields, dim=0), dim=0
+                        ) / forward_motion_weights_sum.clamp(min=0.0001)[:,None,:] #(b,N,3)/(B,1,1)
+        # fg_likelihood_mask = forward_motion_weights_sum
+        #(B,N,3)
+        x_skel = x_skel.reshape(orig_shape[:2]+[-1,3])
+        # fg_likelihood_mask = fg_likelihood_mask.reshape(orig_shape[:2]+[1])
+        return x_skel
     
     def forward(self,
                 rays, 
@@ -630,7 +655,7 @@ class Network(nn.Module):
                 dst_Ts = dst_Ts + refined_Ts
             
             if dst_Rs_history is not None:
-                kwargs.update({'dst_Rs_history':dst_Rs[1:], 'dst_Ts_history':dst_Ts[1:],})
+                kwargs.update({'dst_Rs_history':dst_Rs[1:].detach(), 'dst_Ts_history':dst_Ts[1:].detach(),})
             dst_Rs, dst_Ts = dst_Rs[0:1], dst_Ts[0:1]
 
         non_rigid_pos_embed_fn, _ = \

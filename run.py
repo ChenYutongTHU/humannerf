@@ -234,13 +234,13 @@ def run_movement(render_folder_name='movement'):
         if args.test_num!=-1 and idx>=args.test_num:
             break
         for k, v in batch.items():
-            batch[k] = v[0]
-
-        # if '72' not in batch['frame_name']:
-        #     continue
+            if k=='frame_name_history':
+                batch[k] = [[v2[0] for v2 in v1] for v1 in v]
+            else:
+                batch[k] = v[0]
         data = cpu_data_to_gpu(
                     batch,
-                    exclude_keys=EXCLUDE_KEYS_TO_GPU + ['target_rgbs'])
+                    exclude_keys=EXCLUDE_KEYS_TO_GPU + ['target_rgbs','frame_name_history'])
 
         with torch.no_grad():
             net_output = model(**data, iter_val=cfg.eval_iter)
@@ -264,7 +264,37 @@ def run_movement(render_folder_name='movement'):
             cnl_xyzs, cnl_rgbs, cnl_weights = [net_output['cnl_xyz']],[net_output['cnl_rgb']], [net_output['cnl_weight']]
             img_names = [None] 
         # import ipdb; ipdb.set_trace()
-        # import ipdb; ipdb.set_trace()
+        ### TRACK
+        '''
+        output_dir = os.path.join('debug_output/track')
+        os.makedirs(output_dir, exist_ok=True)
+        lbs_on_weights = torch.sum(backward_motion_weights*weights_on_rays[0][...,None],dim=1)
+        ris = lbs_on_weights.argmax(dim=0).cpu().numpy()[3:]
+        pos_on_image = (batch['ray_mask'].view((512, 512))).nonzero().numpy().astype(np.int32) #N,2
+        def draw_point(frame_name, xys, output_path):
+            import cv2
+            img = cv2.resize(cv2.imread(f'data/zju/CoreView_387/{frame_name}'), (512,512))
+            import matplotlib
+            cmap = matplotlib.cm.get_cmap('Spectral')
+            for i,xy in enumerate(xys):
+                r = int(cmap(i/len(xys))[2]*255)
+                g = int(cmap(i/len(xys))[1]*255)
+                b = int(cmap(i/len(xys))[0]*255)
+                img = cv2.circle(img, tuple(xy), radius=8, color=[r,g,b])
+            cv2.imwrite(output_path, img)
+            return
+
+        draw_point(batch['frame_name'], pos_on_image[ris][:,[1,0]], os.path.join(output_dir, batch['frame_name'].replace('/','-')))
+        uvs = torch.sum(net_output['correspondence_uv']*weights_on_rays[0][...,None,None,None], dim=1).cpu().numpy() #N_ray, num_history, num_view, 2
+        uvs = uvs[ris]
+        import ipdb; ipdb.set_trace()
+        for ti in range(uvs.shape[1]):
+            for vi in range(uvs.shape[2]):
+                draw_point(batch['frame_name_history'][ti][vi], uvs[:,ti,vi,:], 
+                            os.path.join(output_dir, batch['frame_name_history'][ti][vi].replace('/','-')))
+        '''
+        
+
         for hid,(rgb, alpha, depth, cnl_xyz, cnl_rgb, cnl_weight, weights_on_ray, xyz_on_ray, rgb_on_ray, offset_on_ray, img_name) in \
                 enumerate(zip(rgbs, alphas, depths, cnl_xyzs, cnl_rgbs, cnl_weights, weights_on_rays, xyz_on_rays, rgb_on_rays, offsets, img_names)):
 
