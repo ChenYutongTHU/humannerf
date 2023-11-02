@@ -1,6 +1,6 @@
 import os
 
-import torch
+import torch, math
 import numpy as np
 from tqdm import tqdm
 
@@ -19,6 +19,16 @@ def load_network():
     model = create_network()
     ckpt_path = os.path.join(cfg.logdir, f'{cfg.load_net}.tar')
     ckpt = torch.load(ckpt_path, map_location='cuda:0')
+    '''
+    load_dict = {}
+    current_dict = model.state_dict()
+    for k,v in ckpt['network'].items():
+        if current_dict[k].shape == v.shape:
+            load_dict[k] = v 
+        else:
+            print(f'Shape mismatch, {k}')
+    model.load_state_dict(load_dict, strict=False)
+    '''
     model.load_state_dict(ckpt['network'], strict=False)
     print('load network from ', ckpt_path)
     return model.cuda().deploy_mlps_to_secondary_gpus()
@@ -238,6 +248,8 @@ def run_movement(render_folder_name='movement'):
                 batch[k] = [[v2[0] for v2 in v1] for v1 in v]
             else:
                 batch[k] = v[0]
+        # if not '72' in batch['frame_name']:
+        #     continue
         data = cpu_data_to_gpu(
                     batch,
                     exclude_keys=EXCLUDE_KEYS_TO_GPU + ['target_rgbs','frame_name_history'])
@@ -263,9 +275,43 @@ def run_movement(render_folder_name='movement'):
             weights_on_rays, xyz_on_rays, rgb_on_rays = [net_output['weights_on_rays']],[net_output['xyz_on_rays']],[net_output['rgb_on_rays']]
             cnl_xyzs, cnl_rgbs, cnl_weights = [net_output['cnl_xyz']],[net_output['cnl_rgb']], [net_output['cnl_weight']]
             img_names = [None] 
-        # import ipdb; ipdb.set_trace()
-        ### TRACK
+        
         '''
+        ### TRACK
+        tmp_uvs = net_output['tmp_uvs']
+        pii = backward_motion_weights[...,18].argmax() #number in the valid rays
+        ri, pi = pii//128, pii%128
+        uvs_warped = tmp_uvs[ri,pi,:,:,[1,0]].reshape(-1,2).long() #t*v,2
+        ray_mask = batch['ray_mask']
+        pos_on_image = (ray_mask.view((512, 512))).nonzero().to(weights_on_rays[0].device)
+        tmp_features = net_output['tmp_features']
+        features_input = batch['rgb_history'] #(T,V,H,W,D)
+        def draw_point(frame_name, xys, output_path):
+            import cv2
+            img = cv2.resize(cv2.imread(f'data/zju/CoreView_387/{frame_name}'), (512,512))
+            import matplotlib
+            cmap = matplotlib.cm.get_cmap('Spectral')
+            for i,xy in enumerate(xys):
+                r = int(cmap(i/len(xys))[2]*255)
+                g = int(cmap(i/len(xys))[1]*255)
+                b = int(cmap(i/len(xys))[0]*255)
+                img = cv2.circle(img, xy, radius=8, color=[r,g,b])
+            cv2.imwrite(output_path, img)
+            return
+        u, v = pos_on_image[ri][0],pos_on_image[ri][1]
+        fn = batch['frame_name']
+        draw_point(fn, [(v.item(),u.item())], f'debug_output/112-lelbow_{fn.replace("/","-")}')
+        print(f'{batch["frame_name"]}:{[u.item(),v.item()]}->x_c->')
+        for ii,(u,v) in enumerate(uvs_warped):
+            ti, vi = math.floor(ii/4),ii%4
+            fn = batch["frame_name_history"][ti][vi]
+            print(f'{fn}: {[u.item(),v.item()]}', end='\t')
+            value1 = features_input[ti, vi, u, v,:]
+            value2 = tmp_features[ri,pi,ti,vi]
+            print(f'from input: {value1.cpu().numpy()} / from output {value2.cpu().numpy()}')
+            draw_point(fn, [(v.item(),u.item())],f'debug_output/112-lelbow_{fn.replace("/","-")}')
+        import ipdb; ipdb.set_trace()
+
         output_dir = os.path.join('debug_output/track')
         os.makedirs(output_dir, exist_ok=True)
         lbs_on_weights = torch.sum(backward_motion_weights*weights_on_rays[0][...,None],dim=1)

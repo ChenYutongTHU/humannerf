@@ -9,6 +9,7 @@ from core.nets.human_nerf.canonical_mlps.input_encoder import InputEncoder
 from core.nets.human_nerf.canonical_mlps.input_encoder_v2 import InputEncoder_v2
 from configs import cfg 
 
+
 class CanonicalMLP(nn.Module):
     def __init__(self, mlp_depth=8, mlp_width=256, 
                  input_ch=3, skips=None, 
@@ -17,7 +18,7 @@ class CanonicalMLP(nn.Module):
                  pose_color='wo',
                  multihead_enable=False, multihead_depth=1, multihead_num=4,
                  mlp_depth_plus=0,
-                 last_linear_scale=1, **kwargs):
+                 last_linear_scale=1, rgb_dynamic_features_ch=0, **kwargs):
         super(CanonicalMLP, self).__init__()
 
         if skips is None:
@@ -60,7 +61,7 @@ class CanonicalMLP(nn.Module):
         else:
             time_ch = 0
         self.input_ch = input_ch_+time_ch
-        pts_block_mlps = [nn.Linear(input_ch_+time_ch, mlp_width), nn.ReLU()]
+        pts_block_mlps = [nn.Linear(input_ch_+time_ch+rgb_dynamic_features_ch, mlp_width), nn.ReLU()]
         layers_to_cat_input = []
         for i in range(mlp_depth+mlp_depth_plus-1):
             if i in skips:
@@ -128,7 +129,9 @@ class CanonicalMLP(nn.Module):
                 nn.Linear(mlp_width, 1)) #output a scalar
             self.ao_activation = torch.nn.Sigmoid()
 
-    def forward(self, pos_embed, dir_embed=None, condition_code=None, head_id=None, pose_latent=None, time_vec_cnl=None, weights=None, iter_val=1e7, **_):
+    def forward(self, pos_embed, dir_embed=None, condition_code=None, head_id=None, 
+                pose_latent=None, time_vec_cnl=None, weights=None, iter_val=1e7, 
+                rgb_dynamic_features=None, **_):
         if cfg.canonical_mlp.condition_code_delay and iter_val < cfg.canonical_mlp.kick_in_iter:
             h = [pos_embed, torch.zeros_like((pos_embed.shape[0], self.input_ch-pos_embed.shape[1]))]
             import ipdb; ipdb.set_trace()
@@ -154,6 +157,9 @@ class CanonicalMLP(nn.Module):
             else:
                 h = self.input_encoder(pos_embed, condition_code, weights=weights, gate_weight=gate_weight)
 
+        if rgb_dynamic_features is not None:
+            h = torch.cat([h, rgb_dynamic_features], dim=-1)
+            
         for i, _ in enumerate(self.pts_linears):
             if i in self.layers_to_cat_input:
                 h = torch.cat([pos_embed, h], dim=-1)

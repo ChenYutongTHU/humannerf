@@ -1,5 +1,6 @@
 category: 'human_nerf'
 random_seed: 42
+use_amp: False
 #######
 experiments:
   color_perturbation: empty #or per-view 
@@ -37,6 +38,12 @@ condition_code:
 rgb_history:
   last_num: 0 #0
   step: 1
+  feature_cfg:  
+    net: resnet34
+    layer: 6
+  spatial_dim: 32
+  temporal_dim: 32
+  precompute_dir: empty #data/zju/CoreView_387/rgb_features/resnet34/layer-6
 
 
 # canonical mlp

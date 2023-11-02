@@ -16,7 +16,7 @@ train_render:
 
 progress:
   dataset_module: 'core.data.human_nerf.train'
-  dataset: 'zju_387_nb_1view_test'
+  dataset: 'zju_387_nb_1view_test_progress'
 
 movement:
   dataset_module: 'core.data.human_nerf.train'

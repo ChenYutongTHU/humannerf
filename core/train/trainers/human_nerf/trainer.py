@@ -54,7 +54,8 @@ class Trainer(object):
 
         self.optimizer = optimizer
         self.update_lr = create_lr_updater()
-
+        self.use_amp = cfg.use_amp
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
         if cfg.resume and Trainer.ckpt_exists(cfg.load_net):
             self.load_ckpt(f'{cfg.load_net}')
         else:
@@ -194,22 +195,29 @@ class Trainer(object):
 
             # only access the first batch as we process one image one time
             for k, v in batch.items():
-                batch[k] = v[0]
+                if k=='frame_name_history':
+                    batch[k] = [[v2[0] for v2 in v1] for v1 in v]
+                else:
+                    batch[k] = v[0]
 
             batch['iter_val'] = torch.full((1,), self.iter)
             data = cpu_data_to_gpu(
-                batch, exclude_keys=EXCLUDE_KEYS_TO_GPU)
-            net_output = self.network(**data)
+                batch, exclude_keys=EXCLUDE_KEYS_TO_GPU+['frame_name_history'])
+            with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=self.use_amp):
+                net_output = self.network(**data)
+                train_loss, loss_dict = self.get_loss(
+                    net_output=net_output,
+                    patch_masks=data['patch_masks'],
+                    bgcolor=data['bgcolor'] / 255.,
+                    targets=data['target_patches'],
+                    div_indices=data['patch_div_indices'])
 
-            train_loss, loss_dict = self.get_loss(
-                net_output=net_output,
-                patch_masks=data['patch_masks'],
-                bgcolor=data['bgcolor'] / 255.,
-                targets=data['target_patches'],
-                div_indices=data['patch_div_indices'])
+            # train_loss.backward()
+            # self.optimizer.step()
 
-            train_loss.backward()
-            self.optimizer.step()
+            self.scaler.scale(train_loss).backward() 
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
 
             if self.iter % cfg.train.log_interval == 0:
                 loss_str = f"Loss: {train_loss.item():.4f} ["
@@ -271,7 +279,10 @@ class Trainer(object):
 
             # only access the first batch as we process one image one time
             for k, v in batch.items():
-                batch[k] = v[0]
+                if k=='frame_name_history':
+                    batch[k] = [[v2[0] for v2 in v1] for v1 in v]
+                else:
+                    batch[k] = v[0]
 
             width = batch['img_width']
             height = batch['img_height']
@@ -280,7 +291,7 @@ class Trainer(object):
 
             batch['iter_val'] = torch.full((1,), self.iter)
             data = cpu_data_to_gpu(
-                    batch, exclude_keys=EXCLUDE_KEYS_TO_GPU + ['target_rgbs'])
+                    batch, exclude_keys=EXCLUDE_KEYS_TO_GPU + ['target_rgbs','frame_name_history'])
             with torch.no_grad():
                 net_output = self.network(**data)
 

@@ -13,7 +13,8 @@ from core.nets.human_nerf.component_factory import \
     load_non_rigid_motion_transformer_encoder, \
     load_vocab_embedder
 from core.utils.camera_util import project_world2image
-
+from core.nets.human_nerf.rgb_feature import RGB_FeatureComputer
+from core.nets.human_nerf.selfattention import MlpSeq
 from configs import cfg
 
 
@@ -109,7 +110,8 @@ class Network(nn.Module):
                 multihead_depth=cfg.canonical_mlp.multihead.head_depth,
                 multihead_num=cfg.multihead.head_num,
                 last_linear_scale=cfg.canonical_mlp.last_linear_scale,
-                mlp_depth_plus=cfg.canonical_mlp.mlp_depth_plus)
+                mlp_depth_plus=cfg.canonical_mlp.mlp_depth_plus,
+                rgb_dynamic_features_ch=0 if cfg.rgb_history.last_num==0 else cfg.rgb_history.temporal_dim)
         self.cnl_mlp = \
             nn.DataParallel(
                 self.cnl_mlp,
@@ -146,6 +148,15 @@ class Network(nn.Module):
                 self.time_embed_fn_cnl, time_embed_size_cnl = \
                     get_embedder_time(cfg.canonical_mlp.time_vocab_n, 
                                     cfg.canonical_mlp.time_dim)    
+        if cfg.rgb_history.last_num > 0:
+            self.rgb_feature_computer = RGB_FeatureComputer(
+                **cfg.rgb_history.feature_cfg, precompute=(cfg.rgb_history.precompute_dir!='empty'))
+            self.rgb_feature_projector = nn.Sequential(
+                nn.Linear(self.rgb_feature_computer.output_dim, cfg.rgb_history.spatial_dim),
+                nn.ReLU())
+            self.rgb_feature_temporal_encoder = nn.Sequential(
+                nn.Linear(cfg.rgb_history.spatial_dim*cfg.rgb_history.last_num, cfg.rgb_history.temporal_dim),
+                nn.ReLU())
 
     def deploy_mlps_to_secondary_gpus(self):
         self.cnl_mlp = self.cnl_mlp.to(cfg.secondary_gpus[0])
@@ -163,10 +174,11 @@ class Network(nn.Module):
             non_rigid_mlp_input,
             dir_xyz, dir_idx, 
             dir_embed_fn, 
-            head_id, pose_latent, backward_motion_weights, iter_val):
+            head_id, pose_latent, backward_motion_weights, iter_val, rgb_dynamic_features=None):
 
         # (N_rays, N_samples, 3) --> (N_rays x N_samples, 3)
         pos_flat = torch.reshape(pos_xyz, [-1, pos_xyz.shape[-1]])
+        rgb_dynamic_features_flat = rgb_dynamic_features.view(-1, rgb_dynamic_features.shape[-1]) if rgb_dynamic_features is not None else None
         weights_flat = torch.reshape(backward_motion_weights, [-1, backward_motion_weights.shape[-1]])
         if cfg.canonical_mlp.view_embed == 'mlp':
             dir_flat = torch.reshape(dir_xyz, [-1, dir_xyz.shape[-1]])
@@ -181,7 +193,8 @@ class Network(nn.Module):
                         non_rigid_pos_embed_fn=non_rigid_pos_embed_fn,
                         dir_flat=dir_flat, 
                         dir_embed_fn=dir_embed_fn,
-                        chunk=chunk, head_id=head_id, pose_latent=pose_latent, weights_flat=weights_flat, iter_val=iter_val)
+                        chunk=chunk, head_id=head_id, pose_latent=pose_latent, weights_flat=weights_flat, iter_val=iter_val,
+                        rgb_dynamic_features_flat=rgb_dynamic_features_flat)
 
         output = {}
 
@@ -225,7 +238,7 @@ class Network(nn.Module):
             non_rigid_pos_embed_fn,
             dir_flat, 
             dir_embed_fn,
-            chunk, head_id, pose_latent, weights_flat, iter_val):
+            chunk, head_id, pose_latent, weights_flat, iter_val, rgb_dynamic_features_flat):
 
         if cfg.canonical_mlp.multihead.enable and head_id==-1:
             raws_list = [[] for i in range(cfg.multihead.head_num)]
@@ -245,6 +258,7 @@ class Network(nn.Module):
             total_elem = end - start
 
             xyz, dir_ = pos_flat[start:end], dir_flat[start:end]
+            rgb_dynamic_features_chunk =rgb_dynamic_features_flat[start:end] if rgb_dynamic_features_flat is not None else None
             weights = weights_flat[start:end]
             head_id_expanded = self._expand_input(head_id[None, None, ...], total_elem)
             if not cfg.ignore_non_rigid_motions:
@@ -297,7 +311,8 @@ class Network(nn.Module):
                             head_id=head_id_expanded,
                             condition_code=self._expand_input(non_rigid_mlp_input['condition_code_cmlp'], len(cfg.secondary_gpus)) if 'condition_code_cmlp' in non_rigid_mlp_input else None,
                             time_vec_cnl=self._expand_input(non_rigid_mlp_input['time_vec_cnl'], len(cfg.secondary_gpus)) if 'time_vec_cnl' in non_rigid_mlp_input else None,
-                            weights=weights,iter_val=iter_val)] #N*num_head, 4
+                            weights=weights,iter_val=iter_val,
+                            rgb_dynamic_features=rgb_dynamic_features_chunk)] #N*num_head, 4
         
         if cfg.canonical_mlp.multihead.enable  and head_id.min()==-1:
             raws_list = [torch.cat(raws, dim=0).to(cfg.primary_gpus[0]) for raws in raws_list] 
@@ -471,7 +486,7 @@ class Network(nn.Module):
             bgcolor=None, head_id=None,
             pose_latent=None, dir_idx=None, iter_val=1e7,
             dst_Rs_history=None, dst_Ts_history=None, 
-            w2c_history=None,
+            w2c_history=None, rgb_history=None,
             **_):
         
         N_rays = ray_batch.shape[0]
@@ -507,14 +522,36 @@ class Network(nn.Module):
         backward_motion_weights = mv_output['backward_motion_weights']
 
         outputs = {}
-        if w2c_history is not None:
-            with torch.no_grad():
-                x_pose = self.correspondence_forward_searching(cnl_pts, 
-                        forward_motion_weights=backward_motion_weights,
-                        dst_Rs=dst_Rs_history, dst_Ts=dst_Ts_history)
-                uvs = project_world2image(x_pose, w2c_history) #(N_ray, 128, ?, View_num, 2)
-                outputs['correspondence_uv'] = uvs
-                
+        #!!DEBUG
+        if cfg.rgb_history.last_num>0:
+            n_ray, n_point = pts_mask.shape[:2]
+            fg_mask = (pts_mask.detach()>0.1) #TODO #
+            rgb_dynamic_features = torch.zeros([n_ray, n_point, cfg.rgb_history.temporal_dim], 
+                        device=pts_mask.device, dtype=torch.float32)
+            if torch.sum(fg_mask)>0:
+                with torch.no_grad():
+                    cnl_pts_fg = cnl_pts.view(-1,3)[fg_mask.view(-1)]
+                    backward_motion_weights_fg = backward_motion_weights.view(-1,backward_motion_weights.shape[-1])[fg_mask.view(-1)]
+                    x_pose = self.correspondence_forward_searching(cnl_pts_fg,  #N,3
+                            forward_motion_weights=backward_motion_weights_fg,
+                            dst_Rs=dst_Rs_history, dst_Ts=dst_Ts_history) #N_fg, t_num, 3
+                    uvs = project_world2image(x_pose, w2c_history) #(N_fg, t_num, View_num, 2)
+                    n_fg, tn, vn = uvs.shape[:-1]
+                    features_list, id_in_list = self.rgb_feature_computer.compute_and_index_features(
+                        imgs = rgb_history.reshape((-1,)+rgb_history.shape[2:]),#(T*V,H,W,C)
+                        indices_hw = uvs.reshape([n_fg, tn*vn,2])[...,[1,0]], #N_fg, T*V, 2
+                    ) #(NN, D) (N_fg, T*V)
+                    id_in_list = id_in_list.reshape(n_fg, tn, vn)
+                features_spatial = self.rgb_feature_projector(features_list) #NN, D
+                features_spatial = torch.gather(input=features_spatial[None,None,:,:].expand(n_fg, tn, -1, -1), index=id_in_list[:,:,:,None].expand(-1,-1,-1,features_spatial.shape[-1]), dim=2)
+                #(Nfg, tn, vn, D)
+                features_spatial = torch.mean(features_spatial, dim=2) #(Nfg, tn, D1)
+                rgb_dynamic_features_fg = self.rgb_feature_temporal_encoder(features_spatial.reshape(n_fg, -1)) #(Nfg, D2)
+                rgb_dynamic_features = rgb_dynamic_features.type_as(rgb_dynamic_features_fg)
+                rgb_dynamic_features[fg_mask[...,0]] = rgb_dynamic_features_fg
+
+        else:
+            rgb_dynamic_features = None
         #project to RGB given camera_view K E
         ######
 
@@ -526,7 +563,7 @@ class Network(nn.Module):
                                 dir_embed_fn=dir_embed_fn,
                                 dir_xyz=dir_xyz, dir_idx=dir_idx, 
                                 head_id=head_id, pose_latent=pose_latent, backward_motion_weights=backward_motion_weights,
-                                iter_val=iter_val)
+                                iter_val=iter_val, rgb_dynamic_features=rgb_dynamic_features)
         raw = query_result['raws']
         xyz = query_result['xyzs']
         
@@ -553,7 +590,6 @@ class Network(nn.Module):
             rgb_map, acc_map, weights, depth_map, cnl_xyz, cnl_rgb, cnl_weight, rgb_on_rays = \
                 self._raw2outputs(raw, pts_mask, z_vals, rays_d, xyz, bgcolor) #[N_rays, 3]
             #multi_outputs = False
-        #DEBUG
 
         outputs.update({'rgb' : rgb_map,  
                 'alpha' : acc_map, 
@@ -580,7 +616,7 @@ class Network(nn.Module):
                             correct_Rs.reshape(-1, 3, 3)).reshape(-1, total_bones, 3, 3)
 
     def correspondence_forward_searching(self, pts, forward_motion_weights, dst_Rs, dst_Ts):
-        orig_shape = list(pts.shape)
+        orig_shape = list(pts.shape) #N_raysxN_samples,3 or N,3
         pts = pts.reshape(-1, 3) # [N_rays x N_samples, 3]
         forward_motion_weights = forward_motion_weights.reshape(-1, forward_motion_weights.shape[-1])
         motion_scale_Rs, motion_Ts = self._get_motion_base(
@@ -604,7 +640,7 @@ class Network(nn.Module):
                         ) / forward_motion_weights_sum.clamp(min=0.0001)[:,None,:] #(b,N,3)/(B,1,1)
         # fg_likelihood_mask = forward_motion_weights_sum
         #(B,N,3)
-        x_skel = x_skel.reshape(orig_shape[:2]+[-1,3])
+        x_skel = x_skel.reshape(orig_shape[:-1]+[-1,3])
         # fg_likelihood_mask = fg_likelihood_mask.reshape(orig_shape[:2]+[1])
         return x_skel
     

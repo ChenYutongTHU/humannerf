@@ -26,6 +26,9 @@ _C.eval_output_tag = ''
 _C.DEBUG = (os.environ.get('DEBUG','False').lower()=='true')
 _C.num_workers = 0 if _C.DEBUG else 4
 _C.remove = False
+_C.use_amp = False
+_C.height = 512
+_C.width = 512
 
 def get_cfg_defaults():
     return _C.clone()

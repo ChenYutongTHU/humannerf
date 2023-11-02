@@ -668,7 +668,7 @@ class Dataset(torch.utils.data.Dataset):
                 frame_id, camera_id = self.get_frame_camera(frame_name)
                 dst_Rs_history, dst_Ts_history, dst_posevec_last = [], [], []
                 w2c_history = []
-                frame_name_history = []
+                frame_name_history, rgb_history = [], []
                 for i in np.arange(1,cfg.rgb_history.last_num+1)*cfg.rgb_history.step:
                     frame_id_last = max(frame_id - i,0)
                     frame_name_last = self.get_framename(frame_id_last, camera_id)
@@ -685,7 +685,7 @@ class Dataset(torch.utils.data.Dataset):
                     
                     #multiple camera
                     multiview_w2c = []
-                    frame_name_history_multiview = []
+                    frame_name_history_multiview, rgb_history_multiview = [], []
                     for cid in self.views_all:
                         frame_name_last = self.get_framename(frame_id_last, cid)
                         frame_name_history_multiview.append(frame_name_last)
@@ -697,8 +697,18 @@ class Dataset(torch.utils.data.Dataset):
                                 Rh=dst_skel_info_last['Rh'],
                                 Th=dst_skel_info_last['Th'])
                         multiview_w2c.append(K_last@E_last[:3,:].astype(np.float32))
+
+                        if cfg.rgb_history.precompute_dir != 'empty' and cfg.rgb_history.feature_cfg.layer != -1:
+                            feature_path = os.path.join(cfg.rgb_history.precompute_dir, frame_name_last.split('.')[0]+'.bin')
+                            feature_last = torch.load(feature_path)
+                            rgb_history_multiview.append(feature_last) #(H,W,C)
+                        else:
+                            img_last, _ = self.load_image(frame_name_last, bgcolor)
+                            img_last = (img_last / 255.).astype('float32') #(512,512,(0~1)) #unnormalized
+                            rgb_history_multiview.append(img_last)
                     w2c_history.append(np.stack(multiview_w2c, axis=0)) #(num_View, 3,4)
                     frame_name_history.append(frame_name_history_multiview)
+                    rgb_history.append(np.stack(rgb_history_multiview,axis=0)) #V,H,W,C
 
                 results.update({
                     'dst_Rs_history': np.stack(dst_Rs_history, axis=0),
@@ -706,6 +716,7 @@ class Dataset(torch.utils.data.Dataset):
                     'dst_posevec_history': np.stack(dst_posevec_last, axis=0),
                     'w2c_history': np.stack(w2c_history, axis=0), #(N,num_view,3,4)
                     'frame_name_history': frame_name_history,
+                    'rgb_history': np.stack(rgb_history, axis=0) #(N, num_view, 512, 512, 3)
                 })
 
         if 'motion_weights_priors' in self.keyfilter:
@@ -729,7 +740,6 @@ class Dataset(torch.utils.data.Dataset):
             results.update({
                 'dst_posevec': dst_posevec_69,
             })
-
         if self.pose_condition_list is not None:
             results['pose_condition'] = self.pose_condition_list[idx]
             if cfg.pose_condition_random_mask != 'empty' and self.ray_shoot_mode=='patch': #during training
